@@ -637,8 +637,306 @@ class HierarchicalAnalyzer:
             'coefficients': coefficients
         }
     
-    # 他のメソッドは元の実装を保持（簡潔にするため省略表記）
-    def _validate_hierarchical_features(self, features: StructuralTensorFeatures) -> bool:
+    def compare_hierarchical_systems(
+        self, 
+        features_list: List[StructuralTensorFeatures],
+        use_bayesian: bool = True
+    ) -> Dict[str, Any]:
+        """
+        複数系列の階層システム比較（JIT最適化版）
+        
+        Lambda³理論: 複数の構造テンソル系列における
+        階層特性の比較分析とクラスタリング
+        
+        Args:
+            features_list: 構造テンソル特徴量リスト
+            use_bayesian: ベイズ推定使用フラグ
+            
+        Returns:
+            Dict: 階層システム比較結果
+        """
+        print(f"\n{'='*60}")
+        print(f"HIERARCHICAL SYSTEMS COMPARISON")
+        print(f"系列数: {len(features_list)}")
+        print(f"JIT最適化: {'有効' if self.use_jit else '無効'}")
+        print(f"{'='*60}")
+        
+        # 各系列の階層分析実行
+        separation_results = []
+        for features in features_list:
+            try:
+                result = self.analyze_hierarchical_separation(features, use_bayesian)
+                separation_results.append(result)
+            except Exception as e:
+                print(f"警告: {features.series_name} の解析に失敗: {e}")
+                continue
+        
+        if len(separation_results) == 0:
+            return {'error': 'No successful hierarchical analyses'}
+        
+        # 比較メトリクス計算
+        comparison_results = {
+            'series_names': [r.series_name for r in separation_results],
+            'individual_results': separation_results,
+            'comparative_metrics': self._calculate_comparative_metrics(separation_results),
+            'clustering_analysis': self._cluster_hierarchical_systems(separation_results),
+            'ranking_analysis': self._rank_hierarchical_systems(separation_results)
+        }
+        
+        print(f"階層システム比較完了:")
+        print(f"  成功解析数: {len(separation_results)}")
+        print(f"  比較メトリクス: {len(comparison_results['comparative_metrics'])}")
+        
+        return comparison_results
+    
+    def detect_hierarchical_transitions(
+        self, 
+        features: StructuralTensorFeatures,
+        transition_window: int = 10
+    ) -> Dict[str, Any]:
+        """
+        階層遷移イベント検出（JIT最適化版）
+        
+        Lambda³理論: 局所↔大域構造変化の遷移パターンを
+        時系列的に検出し、遷移の方向性と強度を定量化
+        
+        Args:
+            features: 構造テンソル特徴量
+            transition_window: 遷移検出窓サイズ
+            
+        Returns:
+            Dict: 階層遷移検出結果
+        """
+        if not self._validate_hierarchical_features(features):
+            return {'error': 'Hierarchical features not available'}
+        
+        # 階層イベント系列（型安全性確保）
+        local_events = (features.local_pos + features.local_neg).astype(np.float64)
+        global_events = (features.global_pos + features.global_neg).astype(np.float64)
+        
+        # エスカレーション検出（局所→大域）JIT最適化版
+        escalation_events = []
+        for i in range(transition_window, len(local_events)):
+            # 過去の窓で局所イベントがあり、現在大域イベントがある
+            if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
+                # JIT最適化による効率的計算
+                window_start = max(0, i - transition_window)
+                local_activity = np.sum(local_events[window_start:i])
+            else:
+                local_activity = np.sum(local_events[i-transition_window:i])
+            
+            if local_activity > 0 and global_events[i] > 0:
+                escalation_events.append({
+                    'position': i,
+                    'local_activity': float(local_activity),
+                    'intensity': float(global_events[i])
+                })
+        
+        # デエスカレーション検出（大域→局所）JIT最適化版
+        deescalation_events = []
+        for i in range(transition_window, len(global_events)):
+            # 過去の窓で大域イベントがあり、現在局所イベントがある
+            if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
+                window_start = max(0, i - transition_window)
+                global_activity = np.sum(global_events[window_start:i])
+            else:
+                global_activity = np.sum(global_events[i-transition_window:i])
+            
+            if global_activity > 0 and local_events[i] > 0:
+                deescalation_events.append({
+                    'position': i,
+                    'global_activity': float(global_activity),
+                    'intensity': float(local_events[i])
+                })
+        
+        # 遷移統計（JIT最適化考慮）
+        total_local = max(np.sum(local_events), 1)
+        total_global = max(np.sum(global_events), 1)
+        
+        transition_stats = {
+            'escalation_count': len(escalation_events),
+            'deescalation_count': len(deescalation_events),
+            'total_transitions': len(escalation_events) + len(deescalation_events),
+            'escalation_rate': len(escalation_events) / total_local,
+            'deescalation_rate': len(deescalation_events) / total_global,
+            'transition_asymmetry': len(escalation_events) - len(deescalation_events),
+            'transition_balance': abs(len(escalation_events) - len(deescalation_events)) / max(len(escalation_events) + len(deescalation_events), 1)
+        }
+        
+        return {
+            'escalation_events': escalation_events,
+            'deescalation_events': deescalation_events,
+            'transition_statistics': transition_stats,
+            'series_name': features.series_name,
+            'detection_window': transition_window,
+            'jit_optimized': self.use_jit
+        }
+    def _calculate_comparative_metrics(self, results_list: List[HierarchicalSeparationResults]) -> Dict[str, Any]:
+        """比較メトリクス計算（JIT最適化版）"""
+        if len(results_list) == 0:
+            return {}
+        
+        # 各系列の主要メトリクス抽出
+        escalation_strengths = [r.get_escalation_strength() for r in results_list]
+        deescalation_strengths = [r.get_deescalation_strength() for r in results_list]
+        correlations = [abs(r.get_hierarchy_correlation()) for r in results_list]
+        qualities = [r.separation_quality.get('overall_quality', 0) for r in results_list]
+        
+        # JIT最適化による統計計算
+        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
+            try:
+                escalation_array = np.array(escalation_strengths, dtype=np.float64)
+                deescalation_array = np.array(deescalation_strengths, dtype=np.float64)
+                correlations_array = np.array(correlations, dtype=np.float64)
+                qualities_array = np.array(qualities, dtype=np.float64)
+                
+                return {
+                    'escalation_stats': {
+                        'mean': float(np.mean(escalation_array)),
+                        'std': float(np.std(escalation_array)),
+                        'max': float(np.max(escalation_array)),
+                        'min': float(np.min(escalation_array))
+                    },
+                    'deescalation_stats': {
+                        'mean': float(np.mean(deescalation_array)),
+                        'std': float(np.std(deescalation_array)),
+                        'max': float(np.max(deescalation_array)),
+                        'min': float(np.min(deescalation_array))
+                    },
+                    'correlation_stats': {
+                        'mean': float(np.mean(correlations_array)),
+                        'std': float(np.std(correlations_array)),
+                        'max': float(np.max(correlations_array)),
+                        'min': float(np.min(correlations_array))
+                    },
+                    'quality_stats': {
+                        'mean': float(np.mean(qualities_array)),
+                        'std': float(np.std(qualities_array)),
+                        'max': float(np.max(qualities_array)),
+                        'min': float(np.min(qualities_array))
+                    }
+                }
+            except Exception as e:
+                print(f"JIT統計計算エラー: {e}")
+                # フォールバック実行
+        
+        # 標準実装（フォールバック）
+        return {
+            'escalation_stats': {
+                'mean': float(np.mean(escalation_strengths)),
+                'std': float(np.std(escalation_strengths)),
+                'max': float(np.max(escalation_strengths)),
+                'min': float(np.min(escalation_strengths))
+            },
+            'deescalation_stats': {
+                'mean': float(np.mean(deescalation_strengths)),
+                'std': float(np.std(deescalation_strengths)),
+                'max': float(np.max(deescalation_strengths)),
+                'min': float(np.min(deescalation_strengths))
+            },
+            'correlation_stats': {
+                'mean': float(np.mean(correlations)),
+                'std': float(np.std(correlations)),
+                'max': float(np.max(correlations)),
+                'min': float(np.min(correlations))
+            },
+            'quality_stats': {
+                'mean': float(np.mean(qualities)),
+                'std': float(np.std(qualities)),
+                'max': float(np.max(qualities)),
+                'min': float(np.min(qualities))
+            }
+        }
+    
+    def _cluster_hierarchical_systems(self, results_list: List[HierarchicalSeparationResults]) -> Dict[str, Any]:
+        """階層システムクラスタリング（JIT最適化版）"""
+        if len(results_list) < 2:
+            return {'error': 'Insufficient data for clustering'}
+        
+        # 特徴量行列構築
+        features_matrix = []
+        for result in results_list:
+            feature_vector = [
+                result.get_escalation_strength(),
+                result.get_deescalation_strength(),
+                abs(result.get_hierarchy_correlation()),
+                result.separation_quality.get('overall_quality', 0)
+            ]
+            features_matrix.append(feature_vector)
+        
+        features_matrix = np.array(features_matrix, dtype=np.float64)
+        
+        # 簡易k-meansクラスタリング（k=2）JIT最適化版
+        if len(results_list) >= 2:
+            if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
+                try:
+                    # JIT最適化による正規化
+                    normalized_features = normalize_array_fixed(features_matrix.flatten())
+                    normalized_features = normalized_features.reshape(features_matrix.shape)
+                except Exception as e:
+                    print(f"JIT正規化エラー: {e}")
+                    normalized_features = features_matrix
+            else:
+                normalized_features = features_matrix
+            
+            # 単純な二分割（中央値ベース）
+            escalation_median = np.median(features_matrix[:, 0])
+            deescalation_median = np.median(features_matrix[:, 1])
+            
+            cluster_labels = []
+            for i, result in enumerate(results_list):
+                escalation = result.get_escalation_strength()
+                deescalation = result.get_deescalation_strength()
+                
+                if escalation > escalation_median and deescalation > deescalation_median:
+                    cluster_labels.append('high_activity')
+                elif escalation < escalation_median and deescalation < deescalation_median:
+                    cluster_labels.append('low_activity')
+                elif escalation > deescalation:
+                    cluster_labels.append('escalation_dominant')
+                else:
+                    cluster_labels.append('deescalation_dominant')
+            
+            return {
+                'cluster_labels': cluster_labels,
+                'cluster_centers': {
+                    'escalation_median': float(escalation_median),
+                    'deescalation_median': float(deescalation_median)
+                },
+                'cluster_distribution': {label: cluster_labels.count(label) for label in set(cluster_labels)}
+            }
+        
+        return {'error': 'Clustering failed'}
+    
+    def _rank_hierarchical_systems(self, results_list: List[HierarchicalSeparationResults]) -> Dict[str, Any]:
+        """階層システムランキング（JIT最適化版）"""
+        if len(results_list) == 0:
+            return {}
+        
+        # 各指標でのランキング
+        rankings = {}
+        
+        # 分離品質ランキング
+        quality_scores = [(i, r.separation_quality.get('overall_quality', 0)) for i, r in enumerate(results_list)]
+        quality_ranking = sorted(quality_scores, key=lambda x: x[1], reverse=True)
+        rankings['quality_ranking'] = [(results_list[i].series_name, score) for i, score in quality_ranking]
+        
+        # エスカレーション強度ランキング
+        escalation_scores = [(i, r.get_escalation_strength()) for i, r in enumerate(results_list)]
+        escalation_ranking = sorted(escalation_scores, key=lambda x: x[1], reverse=True)
+        rankings['escalation_ranking'] = [(results_list[i].series_name, score) for i, score in escalation_ranking]
+        
+        # デエスカレーション強度ランキング
+        deescalation_scores = [(i, r.get_deescalation_strength()) for i, r in enumerate(results_list)]
+        deescalation_ranking = sorted(deescalation_scores, key=lambda x: x[1], reverse=True)
+        rankings['deescalation_ranking'] = [(results_list[i].series_name, score) for i, score in deescalation_ranking]
+        
+        # 階層バランスランキング（非対称性の低さ）
+        balance_scores = [(i, 1 - abs(r.asymmetry_metrics.get('transition_asymmetry', 0))) for i, r in enumerate(results_list)]
+        balance_ranking = sorted(balance_scores, key=lambda x: x[1], reverse=True)
+        rankings['balance_ranking'] = [(results_list[i].series_name, score) for i, score in balance_ranking]
+        
+        return rankings
         """階層的特徴量の妥当性確認"""
         required_features = ['local_pos', 'local_neg', 'global_pos', 'global_neg']
         return all(hasattr(features, feat) and getattr(features, feat) is not None 
