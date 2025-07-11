@@ -297,7 +297,7 @@ class Lambda3BaseVisualizer(ABC):
             plotted_ax: プロット済み軸
         """
         # 基本時系列
-        ax.plot(time_points, data_values, 'k-', alpha=0.7, linewidth=1.5, label='構造テンソル系列')
+        ax.plot(time_points, data_values, 'k-', alpha=0.7, linewidth=1.5, label='Structure Tensor Series')
         
         # 正の構造変化
         pos_indices = np.where(pos_events > 0)[0]
@@ -351,7 +351,7 @@ class Lambda3BaseVisualizer(ABC):
         # 張力スカラープロット
         line = ax_tension.plot(time_points, rho_t, 
                               color=self.colors['tension'], 
-                              linewidth=2, alpha=0.8, label='ρT (張力スカラー)')
+                              linewidth=2, alpha=0.8, label='tension scalar')
         
         # 面積塗りつぶし
         if fill_under:
@@ -413,7 +413,7 @@ class Lambda3BaseVisualizer(ABC):
             ax.scatter(time_points[local_indices], 
                       [y_positions['local']] * len(local_indices),
                       c=self.colors['local'], marker='s', s=60, 
-                      alpha=0.8, label='局所構造変化', zorder=4)
+                      alpha=0.8, label='local structural changes', zorder=4)
         
         # 大域イベント
         global_indices = np.where(global_events > 0)[0]
@@ -421,7 +421,7 @@ class Lambda3BaseVisualizer(ABC):
             ax.scatter(time_points[global_indices], 
                       [y_positions['global']] * len(global_indices),
                       c=self.colors['global'], marker='o', s=80, 
-                      alpha=0.8, label='大域構造変化', zorder=4)
+                      alpha=0.8, label='Global structural change', zorder=4)
         
         # 混合イベント
         if mixed_events is not None:
@@ -430,13 +430,13 @@ class Lambda3BaseVisualizer(ABC):
                 ax.scatter(time_points[mixed_indices], 
                           [y_positions['mixed']] * len(mixed_indices),
                           c=self.colors['mixed'], marker='D', s=70, 
-                          alpha=0.8, label='混合構造変化', zorder=5)
+                          alpha=0.8, label='Mix structural change', zorder=5)
         
         # Y軸設定
         ax.set_ylim(0, 1)
         ax.set_ylabel('階層レベル')
         ax.set_yticks([y_positions['local'], y_positions['mixed'], y_positions['global']])
-        ax.set_yticklabels(['局所', '混合', '大域'])
+        ax.set_yticklabels(['local', 'mix', 'Global'])
         
         return ax
     
@@ -600,7 +600,7 @@ class TimeSeriesVisualizer(Lambda3BaseVisualizer):
     def create_basic_timeseries_plot(self, 
                                    time_points: np.ndarray,
                                    data_values: np.ndarray,
-                                   title: str = "構造テンソル時系列",
+                                   title: str = "Structure Tensor Time Series",
                                    series_name: str = "Series") -> plt.Figure:
         """
         基本時系列プロット作成
@@ -622,8 +622,8 @@ class TimeSeriesVisualizer(Lambda3BaseVisualizer):
         
         # 軸設定
         self._setup_axis(ax, title=title, 
-                        xlabel='構造空間インデックス', 
-                        ylabel='構造テンソル値')
+                        xlabel='structure space index', 
+                        ylabel='Structure Tensor Values')
         
         ax.legend()
         
@@ -637,7 +637,7 @@ class TimeSeriesVisualizer(Lambda3BaseVisualizer):
     
     def create_multi_series_plot(self, 
                                series_dict: Dict[str, Tuple[np.ndarray, np.ndarray]],
-                               title: str = "マルチ構造テンソル系列") -> plt.Figure:
+                               title: str = "Multi-structure tensor series") -> plt.Figure:
         """
         複数系列プロット作成
         
@@ -660,8 +660,8 @@ class TimeSeriesVisualizer(Lambda3BaseVisualizer):
         
         # 軸設定
         self._setup_axis(ax, title=title,
-                        xlabel='構造空間インデックス',
-                        ylabel='構造テンソル値')
+                        xlabel='structure space index',
+                        ylabel='Structure Tensor Values')
         
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         
@@ -684,7 +684,7 @@ class InteractionVisualizer(Lambda3BaseVisualizer):
     def create_interaction_matrix_plot(self, 
                                      interaction_matrix: np.ndarray,
                                      series_names: List[str],
-                                     title: str = "構造テンソル相互作用行列") -> plt.Figure:
+                                     title: str = "Structure tensor interaction matrix") -> plt.Figure:
         """
         相互作用行列プロット作成
         
@@ -717,7 +717,7 @@ class InteractionVisualizer(Lambda3BaseVisualizer):
         
         # カラーバー
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label('相互作用強度', rotation=270, labelpad=20)
+        cbar.set_label('interaction strength', rotation=270, labelpad=20)
         
         self._setup_axis(ax, title=title, show_grid=False)
         
@@ -741,7 +741,7 @@ class HierarchicalVisualizer(Lambda3BaseVisualizer):
                                        time_points: np.ndarray,
                                        local_series: np.ndarray,
                                        global_series: np.ndarray,
-                                       title: str = "階層分離ダイナミクス") -> plt.Figure:
+                                       title: str = "Class separation dynamics") -> plt.Figure:
         """
         階層分離プロット作成
         
@@ -758,12 +758,12 @@ class HierarchicalVisualizer(Lambda3BaseVisualizer):
         # 局所系列
         ax1.plot(time_points, local_series, 
                 color=self.colors['local'], linewidth=2, 
-                alpha=0.8, label='局所構造系列')
+                alpha=0.8, label='ocal structure series')
         ax1.fill_between(time_points, 0, local_series,
                         color=self.colors['local'], alpha=0.2)
         
-        self._setup_axis(ax1, title=f"{title} - 局所系列",
-                        ylabel='局所構造強度')
+        self._setup_axis(ax1, title=f"{title} - local series",
+                        ylabel='local structure strength')
         ax1.legend()
         
         # 大域系列
@@ -773,8 +773,8 @@ class HierarchicalVisualizer(Lambda3BaseVisualizer):
         ax2.fill_between(time_points, 0, global_series,
                         color=self.colors['global'], alpha=0.2)
         
-        self._setup_axis(ax2, xlabel='構造空間インデックス',
-                        ylabel='大域構造強度')
+        self._setup_axis(ax2, xlabel='structure space index',
+                        ylabel='Global structure series')
         ax2.legend()
         
         plt.tight_layout()
@@ -812,12 +812,12 @@ def create_lambda3_legend_elements() -> List[plt.Line2D]:
     legend_elements = [
         plt.Line2D([0], [0], marker='^', color='w', 
                    markerfacecolor=colors['pos_jump'], markersize=10,
-                   label='ΔΛC⁺ (正の構造変化)'),
+                   label='DeltaLambdaC＋ (positive structural change)'),
         plt.Line2D([0], [0], marker='v', color='w', 
                    markerfacecolor=colors['neg_jump'], markersize=10,
-                   label='ΔΛC⁻ (負の構造変化)'),
+                   label='DeltaLambdaC- (negative structural change)'),
         plt.Line2D([0], [0], color=colors['tension'], linewidth=3,
-                   label='ρT (張力スカラー)')
+                   label='rhoT (Tension Scalar)')
     ]
     
     return legend_elements
@@ -849,7 +849,7 @@ if __name__ == "__main__":
     
     # カラースキーム取得テスト
     colors = get_lambda3_colors('structural_tensor')
-    print(f"構造テンソル色: {colors['pos_jump']}, {colors['neg_jump']}")
+    print(f"Structural tensor color: {colors['pos_jump']}, {colors['neg_jump']}")
     
     # テストデータ生成
     np.random.seed(42)
