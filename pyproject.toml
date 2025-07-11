@@ -1,7 +1,7 @@
 # ==========================================================
 # pyproject.toml - Lambda³ Finance Analyzer Modern Package Configuration
 # 
-# Author: Mamichi Iizumi (Miosync, Inc.)  
+# Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
 # 革新ポイント: PEP 518/621準拠の現代的パッケージ設定
@@ -23,10 +23,10 @@ description = "Lambda³ Theory: Advanced Financial Analysis with Structural Tens
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.email"},
+    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.com"},
 ]
 maintainers = [
-    {name = "Miosync Research Team", email = "info@miosync.email"},
+    {name = "Miosync Research Team", email = "research@miosync.com"},
 ]
 keywords = [
     "finance",
@@ -176,13 +176,10 @@ minimal = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/miosync/lambda3-finance-analyzer"
-Documentation = "https://lambda3-finance.readthedocs.io/"
-Repository = "https://github.com/miosync/lambda3-finance-analyzer"
-"Bug Tracker" = "https://github.com/miosync/lambda3-finance-analyzer/issues"
-Changelog = "https://github.com/miosync/lambda3-finance-analyzer/blob/main/CHANGELOG.md"
-"Research Paper" = "https://arxiv.org/abs/2024.lambda3.theory"
-"Commercial Support" = "https://miosync.com/lambda3-support"
+Homepage = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer"
+Repository = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer"
+"Bug Tracker" = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues"
+Discussions = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/discussions"
 
 [project.scripts]
 lambda3 = "lambda3.cli:main"
@@ -456,7 +453,7 @@ extensions = [
 
 [tool.jupyter-book]
 title = "Lambda³ Theory Documentation"
-author = "Mamichi Iizumi"
+author = "Masamichi Iizumi"
 logo = "docs/static/lambda3_logo.png"
 execute_notebooks = "force"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
