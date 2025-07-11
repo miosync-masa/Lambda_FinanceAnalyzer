@@ -1,25 +1,28 @@
 # ==========================================================
-# lambda3/core/config.py
+# lambda3/core/config.py (JIT Compatible Version)
 # Configuration Management for Lambda³ Theory
 # 
 # Author: Mamichi Iizumi (Miosync, Inc.)
 # License: MIT
+# 
 # ==========================================================
 
 """
-Lambda³理論設定管理システム
+Lambda³理論設定管理システム（JIT互換版）
 
 構造テンソル(Λ)、進行ベクトル(ΛF)、張力スカラー(ρT)の
 解析パラメータを統一管理する設定クラス群。
 
 時間に依存しない構造空間における∆ΛC pulsationsの
 検出と解析に必要な全パラメータを包含。
+
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 import numpy as np
 from pathlib import Path
+import warnings
 
 # ==========================================================
 # GLOBAL CONSTANTS - Lambda³ Theory Defaults
@@ -48,17 +51,90 @@ DEFAULT_HDI_PROB = 0.94
 DEFAULT_LOCAL_THRESHOLD_PERCENTILE = 85.0
 DEFAULT_GLOBAL_THRESHOLD_PERCENTILE = 92.5
 
+# JIT最適化設定（新規追加）
+DEFAULT_JIT_PARALLEL_THRESHOLD = 10000  # 並列化データサイズ閾値
+DEFAULT_JIT_CACHE_SIZE = 100  # JITキャッシュサイズ
+
 # ==========================================================
-# BASE CONFIGURATION CLASS
+# JIT OPTIMIZATION CONFIGURATION (新規追加)
+# ==========================================================
+
+@dataclass
+class L3JITConfig:
+    """
+    Lambda³ JIT最適化設定
+    
+    Numba JITコンパイルの最適化パラメータ管理。
+    構造テンソル演算の高速化設定を統合。
+    """
+    
+    # JIT基本設定
+    enable_jit: bool = True  # JITコンパイル有効化
+    nopython_mode: bool = True  # nopythonモード（必須）
+    fastmath: bool = True  # 高速数学演算
+    cache: bool = True  # コンパイル結果キャッシュ
+    
+    # 並列計算設定
+    enable_parallel: bool = True  # 並列計算有効化
+    parallel_threshold: int = DEFAULT_JIT_PARALLEL_THRESHOLD  # 並列化閾値
+    max_threads: int = 4  # 最大スレッド数
+    
+    # 最適化レベル設定
+    optimization_level: str = 'aggressive'  # conservative, standard, aggressive
+    inline_threshold: int = 100  # インライン展開閾値
+    loop_unrolling: bool = True  # ループ展開
+    
+    # メモリ管理設定
+    memory_alignment: int = 32  # メモリアライメント（バイト）
+    prefetch_distance: int = 8  # プリフェッチ距離
+    
+    # 型安全性設定
+    strict_type_checking: bool = True  # 厳格型チェック
+    type_inference_precision: str = 'high'  # low, medium, high
+    
+    # デバッグ設定
+    enable_profiling: bool = False  # プロファイリング有効化
+    debug_info: bool = False  # デバッグ情報出力
+    
+    def get_jit_options(self) -> Dict[str, Any]:
+        """JIT関数用オプション辞書を生成"""
+        base_options = {
+            'nopython': self.nopython_mode,
+            'fastmath': self.fastmath,
+            'cache': self.cache
+        }
+        
+        # 並列計算オプション（条件付き）
+        if self.enable_parallel:
+            parallel_options = {
+                'parallel': True
+            }
+            # 基本オプションと並列オプションを分離
+            return base_options, parallel_options
+        else:
+            return base_options, {}
+    
+    def get_optimization_flags(self) -> Dict[str, Any]:
+        """最適化フラグ辞書を生成"""
+        optimization_map = {
+            'conservative': {'inline': False, 'unroll': False, 'vectorize': False},
+            'standard': {'inline': True, 'unroll': False, 'vectorize': True},
+            'aggressive': {'inline': True, 'unroll': True, 'vectorize': True}
+        }
+        
+        return optimization_map.get(self.optimization_level, optimization_map['standard'])
+
+# ==========================================================
+# BASE CONFIGURATION CLASS (JIT統合版)
 # ==========================================================
 
 @dataclass
 class L3BaseConfig:
     """
-    Lambda³理論基底設定クラス
+    Lambda³理論基底設定クラス（JIT統合版）
     
     全ての専門設定クラスの基底となる共通パラメータを定義。
-    構造テンソル解析の理論的一貫性を保証。
+    構造テンソル解析の理論的一貫性とJIT最適化の両立を保証。
     """
     
     # 基本構造変化検出パラメータ
@@ -79,17 +155,21 @@ class L3BaseConfig:
     epsilon: float = 1e-8  # 数値ゼロ除算回避用極小値
     dtype: type = np.float64  # データ型（数値精度保証）
     
-    # JIT最適化設定
-    enable_jit: bool = True  # JITコンパイル有効化
-    jit_parallel: bool = True  # JIT並列化有効化
-    jit_cache: bool = True  # JITキャッシュ有効化
+    # JIT最適化設定（統合）
+    jit_config: L3JITConfig = field(default_factory=L3JITConfig)
+    
+    # レガシー互換性設定（削除予定）
+    enable_jit: bool = True  # JITコンパイル有効化（レガシー）
+    jit_parallel: bool = True  # JIT並列化有効化（レガシー）
+    jit_cache: bool = True  # JITキャッシュ有効化（レガシー）
     
     def __post_init__(self):
-        """設定値の妥当性検証"""
+        """設定値の妥当性検証とJIT設定統合"""
         self._validate_parameters()
+        self._sync_legacy_jit_settings()
     
     def _validate_parameters(self):
-        """パラメータ妥当性検証"""
+        """パラメータ妥当性検証（拡張版）"""
         # 時間窓サイズ検証
         if self.window <= 0:
             raise ValueError(f"window must be positive, got {self.window}")
@@ -109,27 +189,71 @@ class L3BaseConfig:
         for name, value in percentiles:
             if not (0 <= value <= 100):
                 raise ValueError(f"{name} must be in [0, 100], got {value}")
+        
+        # データ型検証（JIT互換性）
+        if self.dtype not in [np.float32, np.float64]:
+            warnings.warn(f"dtype {self.dtype} may not be JIT-optimized, recommend np.float64")
+        
+        # 窓サイズとデータ長の整合性検証
+        if self.global_window >= self.T:
+            warnings.warn(f"global_window ({self.global_window}) >= T ({self.T}), may cause boundary issues")
+    
+    def _sync_legacy_jit_settings(self):
+        """レガシーJIT設定との同期"""
+        # レガシー設定をjit_configに反映
+        if hasattr(self, 'enable_jit'):
+            self.jit_config.enable_jit = self.enable_jit
+        if hasattr(self, 'jit_parallel'):
+            self.jit_config.enable_parallel = self.jit_parallel
+        if hasattr(self, 'jit_cache'):
+            self.jit_config.cache = self.jit_cache
+    
+    def get_jit_function_params(self) -> Dict[str, Any]:
+        """JIT関数用パラメータ辞書を生成"""
+        return {
+            'window': int(self.window),
+            'local_window': int(self.local_window),
+            'global_window': int(self.global_window),
+            'delta_percentile': float(self.delta_percentile),
+            'local_percentile': float(self.local_threshold_percentile),
+            'global_percentile': float(self.global_threshold_percentile),
+            'dtype': self.dtype
+        }
     
     def to_dict(self) -> Dict[str, Any]:
-        """設定辞書に変換"""
-        return {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        """設定辞書に変換（JIT設定含む）"""
+        base_dict = {field.name: getattr(self, field.name) for field in self.__dataclass_fields__.values()}
+        # jit_configを辞書形式で追加
+        if hasattr(self.jit_config, '__dict__'):
+            base_dict['jit_config'] = self.jit_config.__dict__
+        return base_dict
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'L3BaseConfig':
-        """辞書から設定オブジェクトを生成"""
-        return cls(**{k: v for k, v in config_dict.items() if k in cls.__dataclass_fields__})
+        """辞書から設定オブジェクトを生成（JIT設定含む）"""
+        # JIT設定の分離処理
+        jit_config_dict = config_dict.pop('jit_config', {})
+        jit_config = L3JITConfig(**jit_config_dict) if jit_config_dict else L3JITConfig()
+        
+        # メイン設定の構築
+        filtered_dict = {k: v for k, v in config_dict.items() if k in cls.__dataclass_fields__}
+        config = cls(**filtered_dict)
+        config.jit_config = jit_config
+        
+        return config
 
 # ==========================================================
-# BAYESIAN ANALYSIS CONFIGURATION
+# BAYESIAN ANALYSIS CONFIGURATION (JIT対応版)
 # ==========================================================
 
 @dataclass
 class L3BayesianConfig(L3BaseConfig):
     """
-    Lambda³ベイズ解析設定
+    Lambda³ベイズ解析設定（JIT対応版）
     
     構造テンソル相互作用のベイズ推定に特化したパラメータ。
     MCMC収束性と統計的精度のバランスを最適化。
+    JIT最適化されたベイズ演算との互換性確保。
     """
     
     # MCMC サンプリングパラメータ
@@ -158,6 +282,11 @@ class L3BayesianConfig(L3BaseConfig):
     r_hat_threshold: float = 1.01  # R-hat収束判定閾値
     ess_threshold: int = 400  # 有効サンプルサイズ閾値
     
+    # JIT最適化ベイズ演算設定（新規追加）
+    use_jit_likelihood: bool = True  # JIT最適化尤度計算
+    jit_vectorize_priors: bool = True  # 事前分布のベクトル化
+    numerical_stability_mode: str = 'high'  # low, medium, high
+    
     def get_sampling_kwargs(self) -> Dict[str, Any]:
         """PyMCサンプリング用パラメータ辞書を生成"""
         return {
@@ -176,9 +305,18 @@ class L3BayesianConfig(L3BaseConfig):
             'hdi_prob': self.hdi_prob,
             'round_to': 4
         }
+    
+    def get_jit_likelihood_params(self) -> Dict[str, Any]:
+        """JIT最適化尤度計算用パラメータ"""
+        return {
+            'use_jit': self.use_jit_likelihood,
+            'vectorize_priors': self.jit_vectorize_priors,
+            'stability_mode': self.numerical_stability_mode,
+            'dtype': self.dtype
+        }
 
 # ==========================================================
-# HIERARCHICAL ANALYSIS CONFIGURATION  
+# HIERARCHICAL ANALYSIS CONFIGURATION (完全保持)
 # ==========================================================
 
 @dataclass
@@ -219,7 +357,7 @@ class L3HierarchicalConfig(L3BaseConfig):
         }
 
 # ==========================================================
-# PAIRWISE ANALYSIS CONFIGURATION
+# PAIRWISE ANALYSIS CONFIGURATION (完全保持)
 # ==========================================================
 
 @dataclass 
@@ -267,7 +405,7 @@ class L3PairwiseConfig(L3BaseConfig):
         return base_params
 
 # ==========================================================
-# SYNCHRONIZATION ANALYSIS CONFIGURATION
+# SYNCHRONIZATION ANALYSIS CONFIGURATION (完全保持)
 # ==========================================================
 
 @dataclass
@@ -296,7 +434,7 @@ class L3SynchronizationConfig(L3BaseConfig):
     cross_scale_coupling_threshold: float = 0.3  # スケール間結合閾値
 
 # ==========================================================
-# VISUALIZATION CONFIGURATION
+# VISUALIZATION CONFIGURATION (完全保持)
 # ==========================================================
 
 @dataclass
@@ -355,16 +493,16 @@ class L3VisualizationConfig:
         }
 
 # ==========================================================
-# COMPREHENSIVE CONFIGURATION
+# COMPREHENSIVE CONFIGURATION (JIT統合版)
 # ==========================================================
 
 @dataclass
 class L3ComprehensiveConfig:
     """
-    Lambda³包括設定
+    Lambda³包括設定（JIT統合版）
     
     全解析モジュールの統合設定管理。
-    理論的一貫性を保持した包括的パラメータ管理。
+    理論的一貫性とJIT最適化の両立を保持した包括的パラメータ管理。
     """
     
     # 基底設定
@@ -379,7 +517,7 @@ class L3ComprehensiveConfig:
     # 可視化設定
     visualization: L3VisualizationConfig = field(default_factory=L3VisualizationConfig)
     
-    # 解析モード設定
+    # 解析モード設定（完全保持）
     analysis_modes: Dict[str, bool] = field(default_factory=lambda: {
         'hierarchical_analysis': True,
         'separation_dynamics': True,
@@ -394,20 +532,23 @@ class L3ComprehensiveConfig:
         'coherence_analysis': False
     })
     
-    # パフォーマンス設定
+    # パフォーマンス設定（JIT統合）
     performance: Dict[str, Any] = field(default_factory=lambda: {
         'enable_parallel_processing': True,
         'max_workers': 4,
         'memory_limit_gb': 8,
-        'cache_intermediate_results': True
+        'cache_intermediate_results': True,
+        'jit_compilation_timeout': 300,  # JITコンパイルタイムアウト（秒）
+        'auto_optimize_parameters': True  # パラメータ自動最適化
     })
     
     def __post_init__(self):
-        """設定間の一貫性確保"""
+        """設定間の一貫性確保（JIT設定含む）"""
         self._ensure_consistency()
+        self._validate_jit_compatibility()
     
     def _ensure_consistency(self):
-        """設定間一貫性確保"""
+        """設定間一貫性確保（拡張版）"""
         # 基底設定を各専門設定に伝播
         base_params = self.base.to_dict()
         
@@ -415,11 +556,36 @@ class L3ComprehensiveConfig:
         for config_obj in [self.bayesian, self.hierarchical, 
                           self.pairwise, self.synchronization]:
             for key, value in base_params.items():
-                if hasattr(config_obj, key):
+                if hasattr(config_obj, key) and key != 'jit_config':
                     setattr(config_obj, key, value)
+            
+            # JIT設定の一貫性確保
+            if hasattr(config_obj, 'jit_config'):
+                config_obj.jit_config = self.base.jit_config
+    
+    def _validate_jit_compatibility(self):
+        """JIT互換性の検証"""
+        # データ型一貫性チェック
+        if self.base.dtype != np.float64:
+            warnings.warn("Non-float64 dtype may cause JIT performance issues")
+        
+        # 並列化設定の整合性チェック
+        if (self.base.jit_config.enable_parallel and 
+            self.performance['max_workers'] > self.base.jit_config.max_threads):
+            warnings.warn("max_workers exceeds JIT max_threads, adjusting")
+            self.performance['max_workers'] = self.base.jit_config.max_threads
+    
+    def get_jit_optimized_params(self) -> Dict[str, Any]:
+        """JIT最適化された全パラメータを取得"""
+        return {
+            'base_params': self.base.get_jit_function_params(),
+            'jit_options': self.base.jit_config.get_jit_options(),
+            'optimization_flags': self.base.jit_config.get_optimization_flags(),
+            'performance_settings': self.performance
+        }
     
     def to_dict(self) -> Dict[str, Any]:
-        """完全設定辞書に変換"""
+        """完全設定辞書に変換（JIT設定含む）"""
         return {
             'base': self.base.to_dict(),
             'bayesian': self.bayesian.to_dict(),
@@ -433,7 +599,7 @@ class L3ComprehensiveConfig:
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'L3ComprehensiveConfig':
-        """辞書から包括設定を生成"""
+        """辞書から包括設定を生成（JIT設定含む）"""
         return cls(
             base=L3BaseConfig.from_dict(config_dict.get('base', {})),
             bayesian=L3BayesianConfig.from_dict(config_dict.get('bayesian', {})),
@@ -467,7 +633,7 @@ class L3ComprehensiveConfig:
         return cls.from_dict(config_dict)
 
 # ==========================================================
-# CONFIGURATION FACTORY FUNCTIONS
+# CONFIGURATION FACTORY FUNCTIONS (完全保持)
 # ==========================================================
 
 def create_default_config() -> L3ComprehensiveConfig:
@@ -502,6 +668,10 @@ def create_rapid_config() -> L3ComprehensiveConfig:
     config.bayesian.tune = 4000
     config.bayesian.chains = 2
     
+    # JIT最適化強化
+    config.base.jit_config.optimization_level = 'aggressive'
+    config.base.jit_config.enable_parallel = True
+    
     # 解析モード簡素化
     config.analysis_modes.update({
         'advanced_visualization': False,
@@ -521,6 +691,10 @@ def create_research_config() -> L3ComprehensiveConfig:
     config.bayesian.target_accept = 0.98
     config.bayesian.r_hat_threshold = 1.005
     
+    # JIT最適化精度重視
+    config.base.jit_config.optimization_level = 'conservative'
+    config.base.jit_config.strict_type_checking = True
+    
     # 全解析モード有効化
     for mode in config.analysis_modes:
         config.analysis_modes[mode] = True
@@ -528,18 +702,19 @@ def create_research_config() -> L3ComprehensiveConfig:
     return config
 
 # ==========================================================
-# CONFIGURATION VALIDATION
+# CONFIGURATION VALIDATION (拡張版)
 # ==========================================================
 
 def validate_config(config: L3ComprehensiveConfig) -> Dict[str, List[str]]:
     """
-    設定の包括的妥当性検証
+    設定の包括的妥当性検証（JIT互換性含む）
     
     Returns:
         Dict[str, List[str]]: モジュール別検証結果
     """
     validation_results = {
         'base': [],
+        'jit': [],
         'bayesian': [],
         'hierarchical': [], 
         'pairwise': [],
@@ -553,6 +728,13 @@ def validate_config(config: L3ComprehensiveConfig) -> Dict[str, List[str]]:
         config.base._validate_parameters()
     except ValueError as e:
         validation_results['base'].append(str(e))
+    
+    # JIT設定検証（新規追加）
+    if not config.base.jit_config.enable_jit:
+        validation_results['jit'].append("JIT disabled - significant performance impact expected")
+    
+    if config.base.jit_config.enable_parallel and config.base.T < config.base.jit_config.parallel_threshold:
+        validation_results['jit'].append(f"Data size ({config.base.T}) below parallel threshold ({config.base.jit_config.parallel_threshold})")
     
     # ベイズ設定検証
     if config.bayesian.draws < 1000:
@@ -581,7 +763,7 @@ def validate_config(config: L3ComprehensiveConfig) -> Dict[str, List[str]]:
     return validation_results
 
 # ==========================================================
-# MAIN CONFIGURATION INTERFACE
+# MAIN CONFIGURATION INTERFACE (完全保持)
 # ==========================================================
 
 # パッケージレベルのデフォルト設定
@@ -608,20 +790,31 @@ def get_config(config_type: str = 'default') -> L3ComprehensiveConfig:
     return factory_func()
 
 if __name__ == "__main__":
-    # 設定システムテスト
-    print("Lambda³ Configuration System Test")
-    print("=" * 40)
+    # 設定システムテスト（JIT互換性含む）
+    print("Lambda³ Configuration System Test (JIT Compatible)")
+    print("=" * 50)
     
     # デフォルト設定生成
     config = create_default_config()
     print(f"Default config created: {type(config).__name__}")
+    print(f"JIT enabled: {config.base.jit_config.enable_jit}")
+    print(f"JIT optimization level: {config.base.jit_config.optimization_level}")
+    
+    # JIT互換性検証
+    jit_params = config.get_jit_optimized_params()
+    print(f"JIT parameters ready: {len(jit_params)} parameter groups")
     
     # 検証実行
     validation_results = validate_config(config)
-    print(f"Validation results: {sum(len(errors) for errors in validation_results.values())} issues found")
+    total_issues = sum(len(errors) for errors in validation_results.values())
+    print(f"Validation results: {total_issues} issues found")
     
     # 金融設定生成
     financial_config = create_financial_config()
     print(f"Financial config created with crisis detection: {financial_config.analysis_modes['crisis_detection']}")
     
-    print("Configuration system ready!")
+    # 高速設定生成
+    rapid_config = create_rapid_config()
+    print(f"Rapid config created with optimization level: {rapid_config.base.jit_config.optimization_level}")
+    
+    print("Configuration system ready with full JIT compatibility!")
