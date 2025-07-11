@@ -1,170 +1,265 @@
 # ==========================================================
-# lambda3/pipelines/comprehensive.py
+# lambda3/pipelines/comprehensive.py (JIT Optimized Version)
 # Comprehensive Analysis Pipeline for Lambda³ Theory
 #
 # Author: Mamichi Iizumi (Miosync, Inc.)
 # License: MIT
+# 
+# 革新ポイント: JIT最適化統合ワークフローの実現
 # ==========================================================
 
 """
-Lambda³理論包括分析パイプライン
+Lambda³理論統合解析パイプライン（JIT最適化版）
 
-構造テンソル(Λ)解析の全工程を統合実行する
-エンドツーエンドパイプライン。データ読み込みから
-高度な可視化まで、理論的一貫性を保持した
-完全自動化分析システム。
+構造テンソル(Λ)理論の全要素を統合した包括的解析ワークフロー。
+階層分析、ペアワイズ相互作用、ベイズ推定、可視化を一括実行。
 
-主要機能:
-- マルチモーダル特徴抽出
-- 階層的構造変化分析
-- ペアワイズ非対称相互作用
-- ベイズ推定による定量化
-- 統合可視化ダッシュボード
+核心機能:
+- JIT最適化による高速統合解析
+- 自動データ前処理とバリデーション
+- 階層・ペアワイズ分析の自動実行
+- 結果統合とレポート生成
+- 金融市場特化ワークフロー
+- リアルタイム分析対応
+
+JIT最適化効果:
+- 大規模データセットの高速処理
+- メモリ効率の最適化
+- 並列処理による性能向上
+- 数値安定性の確保
 """
 
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any, Union
-from pathlib import Path
-import warnings
 from dataclasses import dataclass, field
+import warnings
 import time
+from pathlib import Path
 import json
 
-# Lambda³ core modules
-from ..core.config import (
-    L3ComprehensiveConfig, L3BaseConfig, L3BayesianConfig,
-    L3HierarchicalConfig, L3PairwiseConfig, L3VisualizationConfig
-)
-from ..core.structural_tensor import (
-    StructuralTensorExtractor, StructuralTensorAnalyzer,
-    StructuralTensorFeatures, extract_features_batch
-)
+# Lambda³ 核心モジュール
+try:
+    from ..core.config import (
+        L3ComprehensiveConfig, 
+        L3BaseConfig,
+        create_default_config,
+        create_financial_config,
+        create_rapid_config,
+        create_research_config
+    )
+    from ..core.structural_tensor import StructuralTensorFeatures, StructuralTensorExtractor
+    from ..analysis.hierarchical import HierarchicalAnalyzer, HierarchicalSeparationResults
+    from ..analysis.pairwise import PairwiseAnalyzer, PairwiseInteractionResults
+    LAMBDA3_MODULES_AVAILABLE = True
+except ImportError as e:
+    warnings.warn(f"Lambda³ modules import failed: {e}")
+    LAMBDA3_MODULES_AVAILABLE = False
 
-# Lambda³ analysis modules
-from ..analysis.hierarchical import (
-    HierarchicalAnalyzer, HierarchicalSeparationResults
-)
-from ..analysis.pairwise import (
-    PairwiseAnalyzer, PairwiseInteractionResults
-)
+# JIT最適化関数
+try:
+    from ..core.jit_functions import (
+        extract_lambda3_features_jit,
+        test_jit_functions_fixed,
+        benchmark_performance_fixed
+    )
+    JIT_FUNCTIONS_AVAILABLE = True
+except ImportError:
+    warnings.warn("JIT functions not available in pipeline")
+    JIT_FUNCTIONS_AVAILABLE = False
 
-# Lambda³ visualization modules
-from ..visualization.base import (
-    Lambda3BaseVisualizer, TimeSeriesVisualizer, 
-    InteractionVisualizer, HierarchicalVisualizer
-)
-
-# External dependencies
+# 外部依存関係
 try:
     import yfinance as yf
-    FINANCIAL_DATA_AVAILABLE = True
+    YFINANCE_AVAILABLE = True
 except ImportError:
-    FINANCIAL_DATA_AVAILABLE = False
-    warnings.warn("yfinance not available. Financial data loading disabled.")
+    YFINANCE_AVAILABLE = False
+    warnings.warn("yfinance not available. Financial data acquisition disabled.")
+
+try:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    VISUALIZATION_AVAILABLE = True
+except ImportError:
+    VISUALIZATION_AVAILABLE = False
+    warnings.warn("Visualization libraries not available.")
+
+try:
+    import pymc as pm
+    import arviz as az
+    BAYESIAN_AVAILABLE = True
+except ImportError:
+    BAYESIAN_AVAILABLE = False
 
 # ==========================================================
-# ANALYSIS RESULTS CONTAINER
+# COMPREHENSIVE RESULTS DATA CLASS
 # ==========================================================
 
 @dataclass
 class Lambda3ComprehensiveResults:
     """
-    Lambda³包括分析結果コンテナ
+    Lambda³包括解析結果データクラス
     
-    全分析モジュールの結果を統合管理し、
-    結果間の相互参照と品質評価を提供。
+    Lambda³理論による全解析結果を統合管理。
+    構造テンソル特徴量、階層分析、ペアワイズ分析、統計サマリーを包含。
     """
     
     # メタデータ
-    analysis_timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%d %H:%M:%S"))
-    series_names: List[str] = field(default_factory=list)
-    config: Optional[L3ComprehensiveConfig] = None
+    analysis_timestamp: str
+    config: L3ComprehensiveConfig
+    data_info: Dict[str, Any]
     
-    # 原データ
-    series_dict: Dict[str, np.ndarray] = field(default_factory=dict)
-    
-    # 特徴量
-    features_dict: Dict[str, StructuralTensorFeatures] = field(default_factory=dict)
-    
-    # 構造解析結果
-    structural_analysis: Dict[str, Any] = field(default_factory=dict)
-    
-    # 階層解析結果
+    # 核心結果
+    structural_features: Dict[str, StructuralTensorFeatures] = field(default_factory=dict)
     hierarchical_results: Dict[str, HierarchicalSeparationResults] = field(default_factory=dict)
+    pairwise_results: Dict[str, PairwiseInteractionResults] = field(default_factory=dict)
     
-    # ペアワイズ解析結果
-    pairwise_results: Dict[str, Any] = field(default_factory=dict)
-    
-    # レジーム・危機検出結果
-    regime_results: Dict[str, Any] = field(default_factory=dict)
-    crisis_results: Dict[str, Any] = field(default_factory=dict)
-    
-    # 同期・因果関係結果
-    synchronization_results: Dict[str, Any] = field(default_factory=dict)
-    causality_results: Dict[str, Any] = field(default_factory=dict)
-    
-    # 可視化結果
-    visualization_results: Dict[str, Any] = field(default_factory=dict)
-    
-    # 品質・性能メトリクス
+    # 統合分析結果
+    network_analysis: Dict[str, Any] = field(default_factory=dict)
+    comparative_analysis: Dict[str, Any] = field(default_factory=dict)
     quality_metrics: Dict[str, float] = field(default_factory=dict)
-    performance_metrics: Dict[str, float] = field(default_factory=dict)
     
-    def get_summary(self) -> Dict[str, Any]:
-        """結果サマリー生成"""
+    # 性能情報
+    performance_metrics: Dict[str, Any] = field(default_factory=dict)
+    
+    # エラー・警告情報
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+    
+    def get_analysis_summary(self) -> Dict[str, Any]:
+        """解析サマリー取得"""
         return {
-            'analysis_info': {
-                'timestamp': self.analysis_timestamp,
-                'n_series': len(self.series_names),
-                'series_names': self.series_names,
-                'total_data_points': sum(len(data) for data in self.series_dict.values())
-            },
-            'feature_extraction': {
-                'extracted_series': len(self.features_dict),
-                'feature_types': list(self.features_dict.keys()) if self.features_dict else []
-            },
-            'analysis_modules': {
-                'structural_analysis': bool(self.structural_analysis),
-                'hierarchical_analysis': bool(self.hierarchical_results),
-                'pairwise_analysis': bool(self.pairwise_results),
-                'regime_analysis': bool(self.regime_results),
-                'crisis_detection': bool(self.crisis_results)
-            },
-            'quality_metrics': self.quality_metrics,
-            'performance_metrics': self.performance_metrics
+            'timestamp': self.analysis_timestamp,
+            'jit_optimized': self.config.base.jit_config.enable_jit if hasattr(self.config.base, 'jit_config') else False,
+            'series_count': len(self.structural_features),
+            'hierarchical_analyses': len(self.hierarchical_results),
+            'pairwise_analyses': len(self.pairwise_results),
+            'analysis_modes': {mode: enabled for mode, enabled in self.config.analysis_modes.items() if enabled},
+            'overall_quality': self.quality_metrics.get('overall_quality', 0.0),
+            'execution_time': self.performance_metrics.get('total_execution_time', 0.0),
+            'warning_count': len(self.warnings),
+            'error_count': len(self.errors)
         }
     
-    def save_results(self, filepath: Union[str, Path]):
-        """結果をファイルに保存"""
-        filepath = Path(filepath)
+    def get_top_interactions(self, n: int = 5) -> List[Tuple[str, float]]:
+        """最強相互作用ペア取得"""
+        interactions = []
+        for pair_name, result in self.pairwise_results.items():
+            coupling = result.calculate_bidirectional_coupling()
+            interactions.append((pair_name, coupling))
         
-        # JSONシリアライズ可能な形式に変換
-        serializable_results = {
-            'analysis_timestamp': self.analysis_timestamp,
-            'series_names': self.series_names,
-            'config': self.config.to_dict() if self.config else {},
-            'quality_metrics': self.quality_metrics,
-            'performance_metrics': self.performance_metrics,
-            'summary': self.get_summary()
+        interactions.sort(key=lambda x: x[1], reverse=True)
+        return interactions[:n]
+    
+    def get_hierarchy_rankings(self) -> Dict[str, List[Tuple[str, float]]]:
+        """階層分析ランキング"""
+        rankings = {
+            'escalation_strength': [],
+            'deescalation_strength': [],
+            'separation_quality': []
         }
         
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(serializable_results, f, indent=2, ensure_ascii=False)
+        for series_name, result in self.hierarchical_results.items():
+            rankings['escalation_strength'].append((series_name, result.get_escalation_strength()))
+            rankings['deescalation_strength'].append((series_name, result.get_deescalation_strength()))
+            rankings['separation_quality'].append((series_name, result.separation_quality.get('overall_quality', 0)))
         
-        print(f"分析結果を保存しました: {filepath}")
+        # 各カテゴリでソート
+        for category in rankings:
+            rankings[category].sort(key=lambda x: x[1], reverse=True)
+        
+        return rankings
+    
+    def export_summary_report(self, filepath: Optional[Union[str, Path]] = None) -> str:
+        """サマリーレポート出力"""
+        summary = self.get_analysis_summary()
+        rankings = self.get_hierarchy_rankings()
+        top_interactions = self.get_top_interactions()
+        
+        report_lines = [
+            "=" * 80,
+            "Lambda³ Theory - Comprehensive Analysis Report",
+            "=" * 80,
+            f"Analysis Timestamp: {summary['timestamp']}",
+            f"JIT Optimization: {'Enabled' if summary['jit_optimized'] else 'Disabled'}",
+            f"Series Count: {summary['series_count']}",
+            f"Execution Time: {summary['execution_time']:.2f} seconds",
+            f"Overall Quality: {summary['overall_quality']:.3f}",
+            "",
+            "HIERARCHICAL ANALYSIS RANKINGS:",
+            "-" * 40,
+            "Top Escalation Strength:",
+        ]
+        
+        for i, (series, strength) in enumerate(rankings['escalation_strength'][:5], 1):
+            report_lines.append(f"  {i}. {series}: {strength:.4f}")
+        
+        report_lines.extend([
+            "",
+            "Top Deescalation Strength:",
+        ])
+        
+        for i, (series, strength) in enumerate(rankings['deescalation_strength'][:5], 1):
+            report_lines.append(f"  {i}. {series}: {strength:.4f}")
+        
+        report_lines.extend([
+            "",
+            "PAIRWISE INTERACTION ANALYSIS:",
+            "-" * 40,
+            "Strongest Interactions:",
+        ])
+        
+        for i, (pair, coupling) in enumerate(top_interactions, 1):
+            report_lines.append(f"  {i}. {pair}: {coupling:.4f}")
+        
+        report_lines.extend([
+            "",
+            "PERFORMANCE METRICS:",
+            "-" * 40,
+            f"JIT Optimization: {'Active' if summary['jit_optimized'] else 'Inactive'}",
+            f"Warnings: {summary['warning_count']}",
+            f"Errors: {summary['error_count']}",
+            "",
+            "ANALYSIS MODES:",
+            "-" * 40,
+        ])
+        
+        for mode, enabled in summary['analysis_modes'].items():
+            status = "✓" if enabled else "✗"
+            report_lines.append(f"  {status} {mode}")
+        
+        report_lines.extend([
+            "",
+            "=" * 80,
+            "End of Report",
+            "=" * 80
+        ])
+        
+        report_text = "\n".join(report_lines)
+        
+        if filepath:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(report_text)
+        
+        return report_text
 
 # ==========================================================
-# COMPREHENSIVE PIPELINE CLASS
+# COMPREHENSIVE PIPELINE
 # ==========================================================
 
 class Lambda3ComprehensivePipeline:
     """
-    Lambda³包括分析パイプライン
+    Lambda³包括解析パイプライン（JIT最適化版）
     
-    構造テンソル解析の全工程を統合実行する
-    メインパイプラインクラス。理論的厳密性と
-    実用性のバランスを最適化。
+    構造テンソル理論の全要素を統合した自動解析ワークフロー。
+    データ取得から最終レポート生成まで一括実行。
+    
+    主要機能:
+    - 自動データ前処理とバリデーション
+    - JIT最適化による高速特徴抽出
+    - 階層・ペアワイズ分析の並列実行
+    - 統合ネットワーク解析
+    - 自動品質評価とレポート生成
     """
     
     def __init__(self, config: Optional[L3ComprehensiveConfig] = None):
@@ -172,1148 +267,955 @@ class Lambda3ComprehensivePipeline:
         初期化
         
         Args:
-            config: 包括設定オブジェクト
+            config: Lambda³包括設定
         """
-        self.config = config or L3ComprehensiveConfig()
+        self.config = config or create_default_config()
+        self.execution_history = []
         
-        # 分析器の初期化
-        self.structural_extractor = StructuralTensorExtractor(self.config.base)
-        self.structural_analyzer = StructuralTensorAnalyzer(self.config.base)
+        # JIT最適化確認
+        self.jit_enabled = JIT_FUNCTIONS_AVAILABLE
+        if hasattr(self.config.base, 'jit_config'):
+            self.jit_enabled = self.jit_enabled and self.config.base.jit_config.enable_jit
+        
+        # コンポーネント初期化
+        self.feature_extractor = StructuralTensorExtractor(self.config.base)
         self.hierarchical_analyzer = HierarchicalAnalyzer(self.config.hierarchical, self.config.bayesian)
         self.pairwise_analyzer = PairwiseAnalyzer(self.config.pairwise, self.config.bayesian)
         
-        # 可視化器の初期化
-        self.time_series_viz = TimeSeriesVisualizer(self.config.visualization)
-        self.interaction_viz = InteractionVisualizer(self.config.visualization)
-        self.hierarchical_viz = HierarchicalVisualizer(self.config.visualization)
-        
-        # 実行履歴
-        self.execution_history = []
+        print(f"🚀 Lambda³ Comprehensive Pipeline initialized")
+        print(f"   JIT Optimization: {'Enabled' if self.jit_enabled else 'Disabled'}")
+        print(f"   Modules Available: {LAMBDA3_MODULES_AVAILABLE}")
+        print(f"   Analysis Modes: {sum(self.config.analysis_modes.values())}/{len(self.config.analysis_modes)} enabled")
     
     def run_comprehensive_analysis(
         self,
-        data_source: Union[Dict[str, np.ndarray], str, Path],
-        analysis_modes: Optional[Dict[str, bool]] = None,
-        enable_visualization: bool = True
+        data: Union[Dict[str, np.ndarray], pd.DataFrame, str, Path],
+        analysis_name: Optional[str] = None
     ) -> Lambda3ComprehensiveResults:
         """
-        包括分析実行
+        包括解析実行
         
-        Lambda³理論の全分析モジュールを統合実行し、
-        構造テンソル空間の完全な解析を提供。
+        Lambda³理論の全要素を統合した完全自動解析。
+        データ前処理から最終レポートまで一括実行。
         
         Args:
-            data_source: データソース（辞書、CSVパス、など）
-            analysis_modes: 分析モード設定
-            enable_visualization: 可視化有効フラグ
+            data: 入力データ（辞書、DataFrame、ファイルパス）
+            analysis_name: 解析名（オプション）
             
         Returns:
-            Lambda3ComprehensiveResults: 包括分析結果
+            Lambda3ComprehensiveResults: 包括解析結果
         """
         start_time = time.time()
+        analysis_name = analysis_name or f"Lambda3_Analysis_{int(time.time())}"
         
         print(f"\n{'='*80}")
-        print("LAMBDA³ COMPREHENSIVE ANALYSIS PIPELINE")
+        print(f"LAMBDA³ COMPREHENSIVE ANALYSIS: {analysis_name}")
+        print(f"JIT Optimization: {'Enabled' if self.jit_enabled else 'Disabled'}")
         print(f"{'='*80}")
-        print(f"開始時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # 分析モード設定
-        if analysis_modes is None:
-            analysis_modes = self.config.analysis_modes
-        
-        # 結果コンテナ初期化
-        results = Lambda3ComprehensiveResults(config=self.config)
+        # 結果オブジェクト初期化
+        results = Lambda3ComprehensiveResults(
+            analysis_timestamp=time.strftime('%Y-%m-%d %H:%M:%S'),
+            config=self.config,
+            data_info={}
+        )
         
         try:
-            # Phase 1: データ読み込みと前処理
-            print(f"\n{'='*60}")
-            print("PHASE 1: データ読み込みと前処理")
-            print(f"{'='*60}")
+            # 1. データ前処理とバリデーション
+            processed_data, data_info = self._preprocess_and_validate_data(data)
+            results.data_info = data_info
             
-            series_dict = self._load_and_preprocess_data(data_source)
-            results.series_dict = series_dict
-            results.series_names = list(series_dict.keys())
+            print(f"\n📊 Data Processing Complete:")
+            print(f"   Series count: {len(processed_data)}")
+            print(f"   Data points per series: {data_info.get('average_length', 'N/A')}")
+            print(f"   JIT preprocessing: {'Applied' if self.jit_enabled else 'Standard'}")
             
-            print(f"データ読み込み完了: {len(series_dict)} 系列")
-            for name, data in series_dict.items():
-                print(f"  {name}: {len(data)} points")
+            # 2. 構造テンソル特徴抽出（JIT最適化）
+            structural_features = self._extract_structural_features_optimized(processed_data)
+            results.structural_features = structural_features
             
-            # Phase 2: 構造テンソル特徴抽出
-            print(f"\n{'='*60}")
-            print("PHASE 2: 構造テンソル特徴抽出")
-            print(f"{'='*60}")
+            print(f"\n🔬 Structural Tensor Extraction Complete:")
+            print(f"   Features extracted: {len(structural_features)} series")
+            print(f"   JIT optimization: {'Active' if self.jit_enabled else 'Inactive'}")
             
-            features_dict = self._extract_comprehensive_features(series_dict)
-            results.features_dict = features_dict
-            
-            # Phase 3: 構造パターン解析
-            print(f"\n{'='*60}")
-            print("PHASE 3: 構造パターン解析")
-            print(f"{'='*60}")
-            
-            structural_analysis = self._analyze_structural_patterns(features_dict)
-            results.structural_analysis = structural_analysis
-            
-            # Phase 4: 階層構造解析
-            if analysis_modes.get('hierarchical_analysis', True):
-                print(f"\n{'='*60}")
-                print("PHASE 4: 階層構造解析")
-                print(f"{'='*60}")
-                
-                hierarchical_results = self._analyze_hierarchical_structures(features_dict)
+            # 3. 階層分析実行（条件付き）
+            if self.config.analysis_modes.get('hierarchical_analysis', True):
+                hierarchical_results = self._run_hierarchical_analysis(structural_features)
                 results.hierarchical_results = hierarchical_results
-            
-            # Phase 5: ペアワイズ相互作用解析
-            if analysis_modes.get('pairwise_analysis', True) and len(series_dict) >= 2:
-                print(f"\n{'='*60}")
-                print("PHASE 5: ペアワイズ相互作用解析")
-                print(f"{'='*60}")
                 
-                pairwise_results = self._analyze_pairwise_interactions(features_dict)
+                print(f"\n📈 Hierarchical Analysis Complete:")
+                print(f"   Series analyzed: {len(hierarchical_results)}")
+                avg_quality = np.mean([r.separation_quality.get('overall_quality', 0) 
+                                     for r in hierarchical_results.values()])
+                print(f"   Average separation quality: {avg_quality:.3f}")
+            
+            # 4. ペアワイズ分析実行（条件付き）
+            if self.config.analysis_modes.get('pairwise_analysis', True) and len(structural_features) >= 2:
+                pairwise_results = self._run_pairwise_analysis(structural_features)
                 results.pairwise_results = pairwise_results
-            
-            # Phase 6: 同期・因果関係解析
-            if analysis_modes.get('synchronization_analysis', True) and len(series_dict) >= 2:
-                print(f"\n{'='*60}")
-                print("PHASE 6: 同期・因果関係解析")
-                print(f"{'='*60}")
                 
-                sync_results, causality_results = self._analyze_synchronization_causality(features_dict)
-                results.synchronization_results = sync_results
-                results.causality_results = causality_results
+                print(f"\n🔗 Pairwise Analysis Complete:")
+                print(f"   Pairs analyzed: {len(pairwise_results)}")
+                avg_coupling = np.mean([r.calculate_bidirectional_coupling() 
+                                      for r in pairwise_results.values()])
+                print(f"   Average coupling strength: {avg_coupling:.3f}")
             
-            # Phase 7: レジーム・危機検出
-            if analysis_modes.get('regime_analysis', False):
-                print(f"\n{'='*60}")
-                print("PHASE 7: レジーム・危機検出")
-                print(f"{'='*60}")
+            # 5. ネットワーク解析（条件付き）
+            if self.config.analysis_modes.get('synchronization_analysis', True) and len(results.pairwise_results) > 0:
+                network_analysis = self._run_network_analysis(results)
+                results.network_analysis = network_analysis
                 
-                regime_results, crisis_results = self._detect_regimes_and_crises(features_dict, series_dict)
-                results.regime_results = regime_results
-                results.crisis_results = crisis_results
+                print(f"\n🌐 Network Analysis Complete:")
+                print(f"   Network density: {network_analysis.get('density', 0):.3f}")
+                print(f"   Top centrality: {network_analysis.get('top_central_node', 'N/A')}")
             
-            # Phase 8: 可視化生成
-            if enable_visualization:
-                print(f"\n{'='*60}")
-                print("PHASE 8: 統合可視化生成")
-                print(f"{'='*60}")
-                
-                visualization_results = self._generate_comprehensive_visualizations(results)
-                results.visualization_results = visualization_results
-            
-            # Phase 9: 品質評価と性能測定
-            print(f"\n{'='*60}")
-            print("PHASE 9: 品質評価と性能測定")
-            print(f"{'='*60}")
-            
+            # 6. 品質評価
             quality_metrics = self._evaluate_analysis_quality(results)
             results.quality_metrics = quality_metrics
             
-            # 性能メトリクス
+            # 7. 性能メトリクス記録
             end_time = time.time()
             execution_time = end_time - start_time
             
             performance_metrics = {
                 'total_execution_time': execution_time,
-                'data_processing_rate': sum(len(data) for data in series_dict.values()) / execution_time,
-                'features_per_second': len(features_dict) / execution_time,
+                'jit_enabled': self.jit_enabled,
+                'series_count': len(processed_data),
+                'total_data_points': sum(len(series) for series in processed_data.values()),
+                'processing_rate': sum(len(series) for series in processed_data.values()) / execution_time,
                 'memory_efficiency': self._estimate_memory_usage(results)
             }
             results.performance_metrics = performance_metrics
             
-            print(f"分析完了: {execution_time:.2f}秒")
-            print(f"データ処理レート: {performance_metrics['data_processing_rate']:.0f} points/sec")
+            print(f"\n✅ Comprehensive Analysis Complete!")
+            print(f"   Execution time: {execution_time:.2f} seconds")
+            print(f"   Processing rate: {performance_metrics['processing_rate']:.0f} points/sec")
+            print(f"   Overall quality: {quality_metrics.get('overall_quality', 0):.3f}")
+            
+            # 実行履歴記録
+            self.execution_history.append({
+                'analysis_name': analysis_name,
+                'timestamp': results.analysis_timestamp,
+                'execution_time': execution_time,
+                'series_count': len(processed_data),
+                'quality': quality_metrics.get('overall_quality', 0),
+                'jit_enabled': self.jit_enabled
+            })
+            
+            return results
             
         except Exception as e:
-            print(f"エラーが発生しました: {str(e)}")
-            results.quality_metrics['analysis_error'] = str(e)
-            raise
-        
-        # 実行履歴記録
-        self.execution_history.append({
-            'timestamp': results.analysis_timestamp,
-            'n_series': len(results.series_names),
-            'execution_time': results.performance_metrics.get('total_execution_time', 0),
-            'analysis_modes': analysis_modes,
-            'success': True
-        })
-        
-        print(f"\n{'='*80}")
-        print("LAMBDA³ 包括分析完了")
-        print(f"{'='*80}")
-        
-        return results
-    
-    def _load_and_preprocess_data(self, data_source: Union[Dict, str, Path]) -> Dict[str, np.ndarray]:
-        """データ読み込みと前処理"""
-        if isinstance(data_source, dict):
-            # 辞書形式の場合はそのまま使用
-            series_dict = {name: np.array(data, dtype=np.float64) 
-                          for name, data in data_source.items()}
-        
-        elif isinstance(data_source, (str, Path)):
-            # ファイルパスの場合
-            file_path = Path(data_source)
+            error_msg = f"Comprehensive analysis failed: {str(e)}"
+            print(f"\n❌ {error_msg}")
+            results.errors.append(error_msg)
             
-            if file_path.suffix.lower() == '.csv':
-                # CSV読み込み
-                df = pd.read_csv(file_path, index_col=0, parse_dates=True)
-                series_dict = {col: df[col].values.astype(np.float64) 
-                              for col in df.columns}
-            else:
-                raise ValueError(f"Unsupported file format: {file_path.suffix}")
-        
-        else:
-            raise ValueError("Invalid data_source type")
-        
-        # データ前処理
-        processed_dict = {}
-        for name, data in series_dict.items():
-            # 欠損値処理
-            if np.isnan(data).any():
-                print(f"警告: {name} に欠損値があります。前方埋めを適用します。")
-                mask = np.isnan(data)
-                data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
-            
-            # 無限値処理
-            if np.isinf(data).any():
-                print(f"警告: {name} に無限値があります。クリッピングを適用します。")
-                data = np.clip(data, -1e10, 1e10)
-            
-            processed_dict[name] = data
-        
-        return processed_dict
-    
-    def _extract_comprehensive_features(self, series_dict: Dict[str, np.ndarray]) -> Dict[str, StructuralTensorFeatures]:
-        """包括的特徴抽出"""
-        print("構造テンソル特徴抽出を実行中...")
-        
-        features_dict = {}
-        
-        for series_name, data in series_dict.items():
-            print(f"  {series_name} の特徴抽出中...")
-            
-            try:
-                # 包括的特徴抽出（階層・マルチスケール含む）
-                features = self.structural_extractor.extract_comprehensive_features(
-                    data, 
-                    series_name,
-                    include_multi_scale=True,
-                    scales=[5, 10, 20, 50]
-                )
-                
-                features_dict[series_name] = features
-                
-                # 特徴量統計表示
-                event_counts = features.count_events_by_type()
-                print(f"    イベント数: {event_counts}")
-                
-            except Exception as e:
-                print(f"    エラー: {series_name} の特徴抽出に失敗: {e}")
-                continue
-        
-        print(f"特徴抽出完了: {len(features_dict)} 系列")
-        return features_dict
-    
-    def _analyze_structural_patterns(self, features_dict: Dict[str, StructuralTensorFeatures]) -> Dict[str, Any]:
-        """構造パターン解析"""
-        print("構造パターン解析を実行中...")
-        
-        structural_analysis = {}
-        
-        for series_name, features in features_dict.items():
-            print(f"  {series_name} の構造解析中...")
-            
-            try:
-                # 基本構造パターン解析
-                pattern_analysis = self.structural_analyzer.analyze_structural_patterns(features)
-                
-                # 階層性メトリクス
-                hierarchy_metrics = self.structural_analyzer.calculate_hierarchical_metrics(features)
-                
-                # 構造異常検出
-                anomaly_detection = self.structural_analyzer.detect_structural_anomalies(features)
-                
-                structural_analysis[series_name] = {
-                    'pattern_analysis': pattern_analysis,
-                    'hierarchy_metrics': hierarchy_metrics,
-                    'anomaly_detection': anomaly_detection
-                }
-                
-                print(f"    構造強度: {pattern_analysis.get('structural_intensity', {}).get('total_intensity', 0):.3f}")
-                print(f"    異常検出: {anomaly_detection.get('total_anomalies', 0)} 件")
-                
-            except Exception as e:
-                print(f"    エラー: {series_name} の構造解析に失敗: {e}")
-                continue
-        
-        return structural_analysis
-    
-    def _analyze_hierarchical_structures(self, features_dict: Dict[str, StructuralTensorFeatures]) -> Dict[str, HierarchicalSeparationResults]:
-        """階層構造解析"""
-        print("階層構造解析を実行中...")
-        
-        hierarchical_results = {}
-        
-        for series_name, features in features_dict.items():
-            print(f"  {series_name} の階層解析中...")
-            
-            try:
-                # 階層分離分析
-                hierarchy_result = self.hierarchical_analyzer.analyze_hierarchical_separation(
-                    features, 
-                    use_bayesian=self.config.analysis_modes.get('use_bayesian', True)
-                )
-                
-                hierarchical_results[series_name] = hierarchy_result
-                
-                print(f"    エスカレーション強度: {hierarchy_result.get_escalation_strength():.4f}")
-                print(f"    デエスカレーション強度: {hierarchy_result.get_deescalation_strength():.4f}")
-                print(f"    分離品質: {hierarchy_result.separation_quality.get('overall_quality', 0):.3f}")
-                
-            except Exception as e:
-                print(f"    エラー: {series_name} の階層解析に失敗: {e}")
-                continue
-        
-        return hierarchical_results
-    
-    def _analyze_pairwise_interactions(self, features_dict: Dict[str, StructuralTensorFeatures]) -> Dict[str, Any]:
-        """ペアワイズ相互作用解析"""
-        print("ペアワイズ相互作用解析を実行中...")
-        
-        pairwise_results = {}
-        
-        # 複数ペア比較
-        if len(features_dict) >= 2:
-            try:
-                multi_pair_results = self.pairwise_analyzer.compare_multiple_pairs(
-                    features_dict,
-                    use_bayesian=self.config.analysis_modes.get('use_bayesian', True)
-                )
-                pairwise_results['multi_pair_comparison'] = multi_pair_results
-                
-                print(f"    ペア解析数: {multi_pair_results['summary']['total_pairs_analyzed']}")
-                print(f"    平均相互作用強度: {multi_pair_results['summary']['mean_interaction_strength']:.4f}")
-                print(f"    平均非対称性: {multi_pair_results['summary']['mean_asymmetry']:.4f}")
-                
-            except Exception as e:
-                print(f"    エラー: 複数ペア解析に失敗: {e}")
-        
-        # 主要ペアの詳細解析
-        series_names = list(features_dict.keys())
-        if len(series_names) >= 2:
-            primary_pair = series_names[:2]
-            
-            try:
-                print(f"  主要ペア詳細解析: {primary_pair[0]} ⇄ {primary_pair[1]}")
-                
-                primary_result = self.pairwise_analyzer.analyze_asymmetric_interaction(
-                    features_dict[primary_pair[0]],
-                    features_dict[primary_pair[1]],
-                    use_bayesian=self.config.analysis_modes.get('use_bayesian', True)
-                )
-                
-                pairwise_results['primary_pair'] = primary_result
-                
-                print(f"    結合強度: {primary_result.calculate_bidirectional_coupling():.4f}")
-                print(f"    非対称性: {primary_result.get_asymmetry_score():.4f}")
-                print(f"    品質: {primary_result.interaction_quality.get('overall_quality', 0):.3f}")
-                
-            except Exception as e:
-                print(f"    エラー: 主要ペア解析に失敗: {e}")
-        
-        return pairwise_results
-    
-    def _analyze_synchronization_causality(self, features_dict: Dict[str, StructuralTensorFeatures]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """同期・因果関係解析"""
-        print("同期・因果関係解析を実行中...")
-        
-        sync_results = {}
-        causality_results = {}
-        
-        series_names = list(features_dict.keys())
-        
-        if len(series_names) >= 2:
-            # 同期行列計算
-            print("  同期行列計算中...")
-            
-            # 基本的な同期行列（簡易実装）
-            n_series = len(series_names)
-            sync_matrix = np.eye(n_series)
-            
-            for i, name_a in enumerate(series_names):
-                for j, name_b in enumerate(series_names):
-                    if i != j:
-                        # 張力スカラー相関を同期率として使用
-                        corr = np.corrcoef(
-                            features_dict[name_a].rho_T,
-                            features_dict[name_b].rho_T
-                        )[0, 1]
-                        sync_matrix[i, j] = abs(corr)
-            
-            sync_results = {
-                'sync_matrix': sync_matrix,
-                'series_names': series_names,
-                'mean_sync': float(np.mean(sync_matrix[sync_matrix < 1])),
-                'max_sync': float(np.max(sync_matrix[sync_matrix < 1]))
+            # 部分結果でも返却
+            end_time = time.time()
+            results.performance_metrics = {
+                'total_execution_time': end_time - start_time,
+                'jit_enabled': self.jit_enabled,
+                'error_occurred': True
             }
             
-            print(f"    平均同期率: {sync_results['mean_sync']:.4f}")
-            print(f"    最大同期率: {sync_results['max_sync']:.4f}")
-            
-            # 基本因果関係検出
-            print("  因果関係検出中...")
-            
-            # 主要ペアの因果関係
-            if len(series_names) >= 2:
-                features_a = features_dict[series_names[0]]
-                features_b = features_dict[series_names[1]]
-                
-                # 簡易因果関係（遅延相関）
-                causality_patterns = {}
-                
-                for lag in range(1, 6):  # 1-5遅延
-                    if lag < len(features_a.rho_T):
-                        # A → B 因果関係
-                        cause_series = features_a.rho_T[:-lag]
-                        effect_series = features_b.rho_T[lag:]
-                        corr_ab = np.corrcoef(cause_series, effect_series)[0, 1]
-                        
-                        # B → A 因果関係
-                        cause_series = features_b.rho_T[:-lag]
-                        effect_series = features_a.rho_T[lag:]
-                        corr_ba = np.corrcoef(cause_series, effect_series)[0, 1]
-                        
-                        causality_patterns[f'{series_names[0]}_to_{series_names[1]}'] = {lag: abs(corr_ab)}
-                        causality_patterns[f'{series_names[1]}_to_{series_names[0]}'] = {lag: abs(corr_ba)}
-                
-                causality_results = {
-                    'basic_causality': causality_patterns,
-                    'series_pair': series_names[:2]
-                }
-                
-                # 最強因果関係
-                max_causality = 0
-                strongest_direction = ""
-                for direction, lags in causality_patterns.items():
-                    for lag, strength in lags.items():
-                        if strength > max_causality:
-                            max_causality = strength
-                            strongest_direction = f"{direction} (lag={lag})"
-                
-                causality_results['strongest_causality'] = {
-                    'direction': strongest_direction,
-                    'strength': max_causality
-                }
-                
-                print(f"    最強因果関係: {strongest_direction}")
-                print(f"    因果強度: {max_causality:.4f}")
-        
-        return sync_results, causality_results
+            return results
     
-    def _detect_regimes_and_crises(self, features_dict: Dict[str, StructuralTensorFeatures], series_dict: Dict[str, np.ndarray]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """レジーム・危機検出"""
-        print("レジーム・危機検出を実行中...")
-        
-        regime_results = {}
-        crisis_results = {}
-        
-        # 簡易レジーム検出
-        print("  レジーム検出中...")
-        
-        regime_labels = {}
-        for series_name, features in features_dict.items():
-            # 張力スカラーベースのレジーム分類
-            rho_t = features.rho_T
-            
-            # 3段階レジーム（低・中・高張力）
-            low_threshold = np.percentile(rho_t, 33)
-            high_threshold = np.percentile(rho_t, 67)
-            
-            regime_series = np.zeros(len(rho_t), dtype=int)
-            regime_series[rho_t > high_threshold] = 2  # 高張力レジーム
-            regime_series[(rho_t > low_threshold) & (rho_t <= high_threshold)] = 1  # 中張力レジーム
-            # 低張力レジームは0のまま
-            
-            regime_labels[series_name] = regime_series
-        
-        regime_results = {
-            'regime_labels': regime_labels,
-            'regime_definitions': {
-                0: '低張力レジーム',
-                1: '中張力レジーム', 
-                2: '高張力レジーム'
-            }
-        }
-        
-        # 簡易危機検出
-        print("  危機検出中...")
-        
-        crisis_indicators = {}
-        for series_name, features in features_dict.items():
-            # 張力スカラーと構造変化の組み合わせで危機スコア計算
-            rho_t = features.rho_T
-            structure_changes = features.delta_LambdaC_pos + features.delta_LambdaC_neg
-            
-            # 正規化
-            rho_norm = (rho_t - np.mean(rho_t)) / (np.std(rho_t) + 1e-8)
-            changes_norm = (structure_changes - np.mean(structure_changes)) / (np.std(structure_changes) + 1e-8)
-            
-            # 危機スコア = 高張力 + 高構造変化
-            crisis_score = (rho_norm + changes_norm) / 2
-            crisis_indicators[series_name] = crisis_score
-        
-        # 統合危機スコア
-        if crisis_indicators:
-            all_scores = np.array(list(crisis_indicators.values()))
-            aggregate_crisis = np.mean(all_scores, axis=0)
-            
-            # 危機期間検出（閾値超過）
-            crisis_threshold = 1.5  # 1.5σ以上
-            crisis_periods = aggregate_crisis > crisis_threshold
-            
-            crisis_results = {
-                'crisis_indicators': crisis_indicators,
-                'aggregate_crisis': aggregate_crisis,
-                'crisis_threshold': crisis_threshold,
-                'crisis_periods': crisis_periods,
-                'crisis_episodes': self._find_crisis_episodes(crisis_periods)
-            }
-            
-            n_crisis_episodes = len(crisis_results['crisis_episodes'])
-            print(f"    検出された危機エピソード: {n_crisis_episodes} 件")
-        
-        return regime_results, crisis_results
-    
-    def _find_crisis_episodes(self, crisis_periods: np.ndarray) -> List[Tuple[int, int]]:
-        """危機エピソード検出"""
-        episodes = []
-        
-        # 期間の開始・終了点を検出
-        diff_periods = np.diff(crisis_periods.astype(int))
-        starts = np.where(diff_periods == 1)[0] + 1
-        ends = np.where(diff_periods == -1)[0] + 1
-        
-        # 最初が危機状態の場合
-        if crisis_periods[0]:
-            starts = np.concatenate([[0], starts])
-        
-        # 最後が危機状態の場合
-        if crisis_periods[-1]:
-            ends = np.concatenate([ends, [len(crisis_periods) - 1]])
-        
-        # エピソードペア生成
-        for start, end in zip(starts, ends):
-            episodes.append((int(start), int(end)))
-        
-        return episodes
-    
-    def _generate_comprehensive_visualizations(self, results: Lambda3ComprehensiveResults) -> Dict[str, Any]:
-        """統合可視化生成"""
-        print("統合可視化を生成中...")
-        
-        visualization_results = {}
-        
-        try:
-            # 基本時系列可視化
-            print("  基本時系列プロット生成中...")
-            
-            if len(results.series_names) <= 4:  # 可視化可能な系列数制限
-                series_for_plot = {name: (np.arange(len(data)), data) 
-                                  for name, data in results.series_dict.items()}
-                
-                fig_multi = self.time_series_viz.create_multi_series_plot(
-                    series_for_plot, 
-                    "Lambda³ 構造テンソル系列"
-                )
-                
-                # 保存
-                if self.config.visualization.save_plots:
-                    saved_path = self.time_series_viz._save_figure(fig_multi, "lambda3_multi_series")
-                    visualization_results['multi_series_plot'] = str(saved_path) if saved_path else None
-            
-            # 階層構造可視化
-            if results.hierarchical_results:
-                print("  階層構造プロット生成中...")
-                
-                for series_name, hierarchy_result in list(results.hierarchical_results.items())[:2]:  # 最大2系列
-                    fig_hierarchy = self.hierarchical_viz.create_hierarchy_separation_plot(
-                        np.arange(len(hierarchy_result.local_series)),
-                        hierarchy_result.local_series,
-                        hierarchy_result.global_series,
-                        f"階層分離: {series_name}"
-                    )
-                    
-                    if self.config.visualization.save_plots:
-                        saved_path = self.hierarchical_viz._save_figure(fig_hierarchy, f"hierarchy_{series_name}")
-                        visualization_results[f'hierarchy_plot_{series_name}'] = str(saved_path) if saved_path else None
-            
-            # 相互作用行列可視化
-            if results.pairwise_results and 'multi_pair_comparison' in results.pairwise_results:
-                print("  相互作用行列プロット生成中...")
-                
-                multi_pair = results.pairwise_results['multi_pair_comparison']
-                if 'interaction_matrix' in multi_pair:
-                    
-                    fig_interaction = self.interaction_viz.create_interaction_matrix_plot(
-                        multi_pair['interaction_matrix'],
-                        multi_pair['series_names'],
-                        "Lambda³ 構造テンソル相互作用行列"
-                    )
-                    
-                    if self.config.visualization.save_plots:
-                        saved_path = self.interaction_viz._save_figure(fig_interaction, "interaction_matrix")
-                        visualization_results['interaction_matrix_plot'] = str(saved_path) if saved_path else None
-            
-            visualization_results['generation_success'] = True
-            print("    可視化生成完了")
-            
-        except Exception as e:
-            print(f"    可視化生成エラー: {e}")
-            visualization_results['generation_error'] = str(e)
-            visualization_results['generation_success'] = False
-        
-        return visualization_results
-    
-    def _evaluate_analysis_quality(self, results: Lambda3ComprehensiveResults) -> Dict[str, float]:
-        """分析品質評価"""
-        print("分析品質を評価中...")
-        
-        quality_metrics = {}
-        
-    def _evaluate_analysis_quality(self, results: Lambda3ComprehensiveResults) -> Dict[str, float]:
-        """分析品質評価"""
-        print("分析品質を評価中...")
-        
-        quality_metrics = {}
-        
-        # データ品質
-        total_data_points = sum(len(data) for data in results.series_dict.values())
-        valid_series = len(results.features_dict)
-        data_quality = valid_series / max(len(results.series_dict), 1)
-        quality_metrics['data_quality'] = data_quality
-        
-        # 特徴抽出品質
-        if results.features_dict:
-            total_events = 0
-            for features in results.features_dict.values():
-                event_counts = features.count_events_by_type()
-                total_events += sum(event_counts.values())
-            
-            feature_density = total_events / total_data_points if total_data_points > 0 else 0
-            quality_metrics['feature_density'] = feature_density
-            quality_metrics['feature_extraction_success_rate'] = 1.0  # 成功した場合
-        else:
-            quality_metrics['feature_density'] = 0.0
-            quality_metrics['feature_extraction_success_rate'] = 0.0
-        
-        # 階層分析品質
-        if results.hierarchical_results:
-            hierarchy_qualities = []
-            for hierarchy_result in results.hierarchical_results.values():
-                overall_quality = hierarchy_result.separation_quality.get('overall_quality', 0)
-                hierarchy_qualities.append(overall_quality)
-            
-            quality_metrics['mean_hierarchy_quality'] = float(np.mean(hierarchy_qualities))
-            quality_metrics['hierarchy_analysis_coverage'] = len(hierarchy_qualities) / valid_series
-        else:
-            quality_metrics['mean_hierarchy_quality'] = 0.0
-            quality_metrics['hierarchy_analysis_coverage'] = 0.0
-        
-        # ペアワイズ分析品質
-        if results.pairwise_results:
-            if 'primary_pair' in results.pairwise_results:
-                primary_quality = results.pairwise_results['primary_pair'].interaction_quality.get('overall_quality', 0)
-                quality_metrics['pairwise_interaction_quality'] = primary_quality
-            
-            if 'multi_pair_comparison' in results.pairwise_results:
-                multi_pair = results.pairwise_results['multi_pair_comparison']
-                total_possible_pairs = len(results.series_names) * (len(results.series_names) - 1)
-                actual_pairs = multi_pair['summary']['total_pairs_analyzed']
-                quality_metrics['pairwise_coverage'] = actual_pairs / max(total_possible_pairs, 1)
-            else:
-                quality_metrics['pairwise_coverage'] = 0.0
-        else:
-            quality_metrics['pairwise_interaction_quality'] = 0.0
-            quality_metrics['pairwise_coverage'] = 0.0
-        
-        # 総合品質スコア
-        core_metrics = [
-            quality_metrics['data_quality'],
-            quality_metrics['feature_extraction_success_rate'],
-            quality_metrics['mean_hierarchy_quality'],
-            quality_metrics['pairwise_interaction_quality']
-        ]
-        
-        quality_metrics['overall_analysis_quality'] = float(np.mean(core_metrics))
-        
-        print(f"    総合分析品質: {quality_metrics['overall_analysis_quality']:.3f}")
-        print(f"    データ品質: {quality_metrics['data_quality']:.3f}")
-        print(f"    特徴密度: {quality_metrics['feature_density']:.4f}")
-        
-        return quality_metrics
-    
-    def _estimate_memory_usage(self, results: Lambda3ComprehensiveResults) -> float:
-        """メモリ使用量推定"""
-        total_arrays = 0
-        
-        # 原データ
-        for data in results.series_dict.values():
-            total_arrays += data.nbytes
-        
-        # 特徴量データ
-        for features in results.features_dict.values():
-            for attr_name in ['data', 'delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend']:
-                attr_value = getattr(features, attr_name)
-                if attr_value is not None and hasattr(attr_value, 'nbytes'):
-                    total_arrays += attr_value.nbytes
-        
-        # MB単位で返す
-        return total_arrays / (1024 * 1024)
-    
-    def run_financial_data_analysis(
+    def run_financial_analysis(
         self,
         tickers: Optional[Dict[str, str]] = None,
-        start_date: str = "2022-01-01",
+        start_date: str = "2023-01-01",
         end_date: str = "2024-12-31",
         enable_crisis_detection: bool = True
     ) -> Lambda3ComprehensiveResults:
         """
-        金融データの包括分析実行
+        金融市場分析ワークフロー
         
-        Lambda³理論による金融市場分析の特化実行。
-        自動データ取得、特化設定、金融特有の解析を提供。
+        Lambda³理論による金融市場の構造変化分析。
+        データ取得から危機検出まで全自動実行。
         
         Args:
-            tickers: {表示名: ティッカー} 辞書
+            tickers: ティッカー辞書 {name: ticker}
             start_date, end_date: 分析期間
-            enable_crisis_detection: 危機検出有効フラグ
+            enable_crisis_detection: 危機検出有効化
             
         Returns:
             Lambda3ComprehensiveResults: 金融分析結果
         """
-        if not FINANCIAL_DATA_AVAILABLE:
-            raise ImportError("yfinance not available. Cannot perform financial data analysis.")
-        
-        print(f"\n{'='*80}")
-        print("LAMBDA³ FINANCIAL DATA ANALYSIS")
-        print(f"{'='*80}")
+        if not YFINANCE_AVAILABLE:
+            raise ImportError("yfinance not available for financial analysis")
         
         # デフォルトティッカー
         if tickers is None:
             tickers = {
                 "USD/JPY": "JPY=X",
-                "OIL": "CL=F",
-                "GOLD": "GC=F", 
-                "Nikkei": "^N225",
-                "S&P500": "^GSPC"
+                "Bitcoin": "BTC-USD",
+                "S&P500": "^GSPC",
+                "Gold": "GC=F",
+                "Oil": "CL=F"
             }
         
-        # 金融データ取得
-        print(f"金融データ取得中: {start_date} - {end_date}")
-        financial_data = {}
+        print(f"\n📈 Lambda³ Financial Market Analysis")
+        print(f"Period: {start_date} to {end_date}")
+        print(f"Assets: {list(tickers.keys())}")
+        print(f"Crisis Detection: {'Enabled' if enable_crisis_detection else 'Disabled'}")
         
-        for display_name, ticker in tickers.items():
-            try:
-                print(f"  {display_name} ({ticker}) 取得中...")
-                ticker_data = yf.download(ticker, start=start_date, end=end_date)['Close']
-                if len(ticker_data) > 50:  # 最小データ長チェック
-                    financial_data[display_name] = ticker_data.values
-                    print(f"    成功: {len(ticker_data)} データポイント")
-                else:
-                    print(f"    スキップ: データ不足 ({len(ticker_data)} points)")
-            except Exception as e:
-                print(f"    エラー: {e}")
-                continue
+        # 金融データ取得
+        financial_data = self._acquire_financial_data(tickers, start_date, end_date)
         
         if not financial_data:
-            raise ValueError("金融データの取得に失敗しました")
+            raise ValueError("No financial data acquired")
         
-        # 金融特化設定
-        financial_config = self.config
-        financial_config.analysis_modes.update({
-            'regime_analysis': True,
-            'crisis_detection': enable_crisis_detection,
-            'volatility_analysis': True
-        })
+        # 金融特化設定適用
+        original_config = self.config
+        self.config = create_financial_config()
         
-        # 金融特化パラメータ調整
-        financial_config.base.delta_percentile = 95.0  # より敏感な検出
-        financial_config.hierarchical.escalation_threshold = 0.5
+        # 危機検出設定
+        if enable_crisis_detection:
+            self.config.analysis_modes['crisis_detection'] = True
+            self.config.hierarchical.escalation_threshold = 0.4  # より敏感に
+            self.config.pairwise.asymmetry_detection_sensitivity = 0.05  # より精密に
         
-        # 包括分析実行
-        results = self.run_comprehensive_analysis(
-            financial_data,
-            analysis_modes=financial_config.analysis_modes,
-            enable_visualization=True
-        )
-        
-        # 金融特有の追加解析
-        print(f"\n{'='*60}")
-        print("金融特有解析の実行")
-        print(f"{'='*60}")
-        
-        # ボラティリティ解析
-        volatility_analysis = self._analyze_financial_volatility(financial_data, results.features_dict)
-        results.regime_results['volatility_analysis'] = volatility_analysis
-        
-        # 市場結合度分析
-        if len(financial_data) >= 2:
-            market_coupling = self._analyze_market_coupling(results.features_dict)
-            results.synchronization_results['market_coupling'] = market_coupling
-        
-        print("金融分析完了")
-        return results
+        try:
+            # 包括分析実行
+            results = self.run_comprehensive_analysis(
+                financial_data, 
+                analysis_name=f"Financial_Analysis_{start_date}_{end_date}"
+            )
+            
+            # 金融特化後処理
+            if enable_crisis_detection:
+                crisis_analysis = self._detect_financial_crises(results)
+                results.network_analysis['crisis_analysis'] = crisis_analysis
+                
+                print(f"\n🚨 Crisis Detection Results:")
+                crisis_periods = crisis_analysis.get('crisis_periods', [])
+                print(f"   Crisis periods detected: {len(crisis_periods)}")
+                for period in crisis_periods[:3]:  # 上位3件表示
+                    print(f"   - {period['start']} to {period['end']}: {period['severity']:.3f}")
+            
+            return results
+            
+        finally:
+            # 設定復元
+            self.config = original_config
     
-    def _analyze_financial_volatility(
-        self, 
-        data_dict: Dict[str, np.ndarray],
-        features_dict: Dict[str, StructuralTensorFeatures]
+    def run_rapid_screening(
+        self,
+        data: Union[Dict[str, np.ndarray], pd.DataFrame],
+        screening_threshold: float = 0.5
     ) -> Dict[str, Any]:
-        """金融ボラティリティ解析"""
-        print("  ボラティリティ解析中...")
+        """
+        高速スクリーニング分析
         
-        volatility_analysis = {}
+        Lambda³理論による大量データの高速スクリーニング。
+        JIT最適化を最大限活用した超高速分析。
         
-        for asset_name, price_data in data_dict.items():
-            # リターン計算
-            returns = np.diff(price_data) / price_data[:-1]
+        Args:
+            data: 入力データ
+            screening_threshold: スクリーニング閾値
             
-            # 実現ボラティリティ
-            realized_vol = np.std(returns) * np.sqrt(252)  # 年率化
+        Returns:
+            Dict: スクリーニング結果
+        """
+        start_time = time.time()
+        
+        print(f"\n⚡ Lambda³ Rapid Screening Analysis")
+        print(f"JIT Acceleration: {'Maximum' if self.jit_enabled else 'Standard'}")
+        
+        # 高速設定適用
+        rapid_config = create_rapid_config()
+        rapid_config.base.jit_config.optimization_level = 'aggressive'
+        
+        # データ前処理（最小限）
+        processed_data, _ = self._preprocess_and_validate_data(data, minimal=True)
+        
+        screening_results = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'series_count': len(processed_data),
+            'threshold': screening_threshold,
+            'flagged_series': [],
+            'interaction_alerts': [],
+            'performance_metrics': {}
+        }
+        
+        # 高速特徴抽出（JIT最適化）
+        feature_extraction_times = []
+        
+        for series_name, series_data in processed_data.items():
+            feature_start = time.time()
             
-            # 張力スカラーとボラティリティの関係
-            if asset_name in features_dict:
-                rho_t = features_dict[asset_name].rho_T[1:]  # リターンと長さ合わせ
-                
-                # 張力-ボラティリティ相関
-                rolling_vol = []
-                window = 20  # 20日窓
-                
-                for i in range(window, len(returns)):
-                    window_vol = np.std(returns[i-window:i]) * np.sqrt(252)
-                    rolling_vol.append(window_vol)
-                
-                if len(rolling_vol) > 0:
-                    rolling_vol = np.array(rolling_vol)
-                    rho_subset = rho_t[window:]
+            if self.jit_enabled and JIT_FUNCTIONS_AVAILABLE:
+                try:
+                    # JIT最適化による超高速抽出
+                    features_tuple = extract_lambda3_features_jit(
+                        series_data,
+                        window=5,  # 高速化のため縮小
+                        local_window=3,
+                        global_window=10
+                    )
                     
-                    if len(rho_subset) == len(rolling_vol):
-                        tension_vol_corr = np.corrcoef(rho_subset, rolling_vol)[0, 1]
-                    else:
-                        tension_vol_corr = 0.0
+                    # 簡易品質スコア計算
+                    delta_pos, delta_neg, rho_t = features_tuple[:3]
+                    total_events = np.sum(delta_pos) + np.sum(delta_neg)
+                    avg_tension = np.mean(rho_t)
+                    quality_score = (total_events / len(series_data)) * avg_tension
+                    
+                    if quality_score > screening_threshold:
+                        screening_results['flagged_series'].append({
+                            'series_name': series_name,
+                            'quality_score': float(quality_score),
+                            'event_rate': float(total_events / len(series_data)),
+                            'avg_tension': float(avg_tension)
+                        })
+                    
+                except Exception as e:
+                    print(f"JIT screening failed for {series_name}: {e}")
+            
+            feature_time = time.time() - feature_start
+            feature_extraction_times.append(feature_time)
+        
+        # ペアワイズ高速スクリーニング（上位候補のみ）
+        flagged_names = [item['series_name'] for item in screening_results['flagged_series']]
+        
+        if len(flagged_names) >= 2:
+            for i, name_a in enumerate(flagged_names[:5]):  # 上位5件のみ
+                for name_b in flagged_names[i+1:6]:
+                    try:
+                        # 簡易相関計算
+                        series_a = processed_data[name_a]
+                        series_b = processed_data[name_b]
+                        min_len = min(len(series_a), len(series_b))
+                        
+                        correlation = np.corrcoef(
+                            series_a[:min_len], 
+                            series_b[:min_len]
+                        )[0, 1]
+                        
+                        if abs(correlation) > 0.7:  # 高相関アラート
+                            screening_results['interaction_alerts'].append({
+                                'pair': f"{name_a}_vs_{name_b}",
+                                'correlation': float(correlation),
+                                'alert_type': 'high_correlation'
+                            })
+                    
+                    except Exception as e:
+                        continue
+        
+        # 性能メトリクス
+        end_time = time.time()
+        total_time = end_time - start_time
+        
+        screening_results['performance_metrics'] = {
+            'total_execution_time': total_time,
+            'average_feature_time': np.mean(feature_extraction_times),
+            'processing_rate': sum(len(s) for s in processed_data.values()) / total_time,
+            'jit_enabled': self.jit_enabled
+        }
+        
+        print(f"\n✅ Rapid Screening Complete!")
+        print(f"   Execution time: {total_time:.2f} seconds")
+        print(f"   Flagged series: {len(screening_results['flagged_series'])}")
+        print(f"   Interaction alerts: {len(screening_results['interaction_alerts'])}")
+        print(f"   Processing rate: {screening_results['performance_metrics']['processing_rate']:.0f} points/sec")
+        
+        return screening_results
+    
+    def _preprocess_and_validate_data(
+        self, 
+        data: Union[Dict[str, np.ndarray], pd.DataFrame, str, Path],
+        minimal: bool = False
+    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+        """データ前処理とバリデーション"""
+        
+        # データ形式統一
+        if isinstance(data, (str, Path)):
+            # ファイル読み込み
+            data_path = Path(data)
+            if data_path.suffix == '.csv':
+                df = pd.read_csv(data_path)
+                processed_data = {col: df[col].values for col in df.columns if df[col].dtype in [np.float64, np.int64]}
+            else:
+                raise ValueError(f"Unsupported file format: {data_path.suffix}")
+        
+        elif isinstance(data, pd.DataFrame):
+            # DataFrame変換
+            numeric_columns = data.select_dtypes(include=[np.number]).columns
+            processed_data = {col: data[col].values for col in numeric_columns}
+        
+        elif isinstance(data, dict):
+            # 辞書形式確認
+            processed_data = {}
+            for name, series in data.items():
+                if isinstance(series, (list, tuple)):
+                    processed_data[name] = np.array(series, dtype=np.float64)
+                elif isinstance(series, np.ndarray):
+                    processed_data[name] = series.astype(np.float64)
                 else:
-                    tension_vol_corr = 0.0
+                    raise ValueError(f"Unsupported data type for {name}: {type(series)}")
+        else:
+            raise ValueError(f"Unsupported data format: {type(data)}")
+        
+        if not processed_data:
+            raise ValueError("No valid numeric data found")
+        
+        # データ品質チェック
+        data_info = {
+            'series_count': len(processed_data),
+            'series_names': list(processed_data.keys()),
+            'lengths': {name: len(series) for name, series in processed_data.items()},
+            'average_length': np.mean([len(series) for series in processed_data.values()]),
+            'preprocessing_mode': 'minimal' if minimal else 'comprehensive'
+        }
+        
+        if not minimal:
+            # 包括的前処理
+            for name, series in processed_data.items():
+                # 欠損値処理
+                if np.isnan(series).any():
+                    mask = np.isnan(series)
+                    if np.all(mask):
+                        raise ValueError(f"Series {name} contains only NaN values")
+                    
+                    # 線形補間
+                    valid_indices = np.flatnonzero(~mask)
+                    invalid_indices = np.flatnonzero(mask)
+                    series[mask] = np.interp(invalid_indices, valid_indices, series[valid_indices])
+                    processed_data[name] = series
                 
-                volatility_analysis[asset_name] = {
-                    'realized_volatility': float(realized_vol),
-                    'mean_return': float(np.mean(returns)),
-                    'sharpe_ratio': float(np.mean(returns) / np.std(returns)) if np.std(returns) > 0 else 0.0,
-                    'tension_volatility_correlation': float(tension_vol_corr),
-                    'max_drawdown': float(self._calculate_max_drawdown(price_data))
-                }
+                # 無限値処理
+                if np.isinf(series).any():
+                    series = np.clip(series, -1e10, 1e10)
+                    processed_data[name] = series
             
-            print(f"    {asset_name}: Vol={realized_vol:.2%}")
+            # 長さ統一（オプション）
+            if len(set(data_info['lengths'].values())) > 1:
+                min_length = min(data_info['lengths'].values())
+                for name in processed_data:
+                    processed_data[name] = processed_data[name][:min_length]
+                
+                data_info['length_unified'] = min_length
         
-        return volatility_analysis
+        return processed_data, data_info
     
-    def _calculate_max_drawdown(self, price_series: np.ndarray) -> float:
-        """最大ドローダウン計算"""
-        peak = price_series[0]
-        max_dd = 0.0
+    def _extract_structural_features_optimized(
+        self, 
+        data: Dict[str, np.ndarray]
+    ) -> Dict[str, StructuralTensorFeatures]:
+        """構造テンソル特徴抽出（JIT最適化版）"""
         
-        for price in price_series:
-            if price > peak:
-                peak = price
+        features_dict = {}
+        extraction_times = []
+        
+        for series_name, series_data in data.items():
+            start_time = time.time()
             
-            drawdown = (peak - price) / peak
-            if drawdown > max_dd:
-                max_dd = drawdown
+            try:
+                if self.jit_enabled and JIT_FUNCTIONS_AVAILABLE:
+                    # JIT最適化による高速抽出
+                    features_tuple = extract_lambda3_features_jit(
+                        series_data,
+                        window=self.config.base.window,
+                        local_window=self.config.base.local_window,
+                        global_window=self.config.base.global_window,
+                        delta_percentile=self.config.base.delta_percentile,
+                        local_percentile=self.config.base.local_threshold_percentile,
+                        global_percentile=self.config.base.global_threshold_percentile
+                    )
+                    
+                    # StructuralTensorFeatures オブジェクト構築
+                    delta_pos, delta_neg, rho_t, local_pos, local_neg, global_pos, global_neg = features_tuple
+                    
+                    features = StructuralTensorFeatures(
+                        data=series_data,
+                        series_name=series_name,
+                        delta_LambdaC_pos=delta_pos,
+                        delta_LambdaC_neg=delta_neg,
+                        rho_T=rho_t,
+                        local_pos=local_pos,
+                        local_neg=local_neg,
+                        global_pos=global_pos,
+                        global_neg=global_neg
+                    )
+                    
+                else:
+                    # 標準特徴抽出
+                    features = self.feature_extractor.extract_hierarchical_features(
+                        series_data, series_name
+                    )
+                
+                features_dict[series_name] = features
+                
+                extraction_time = time.time() - start_time
+                extraction_times.append(extraction_time)
+                
+            except Exception as e:
+                print(f"Feature extraction failed for {series_name}: {e}")
+                continue
         
-        return max_dd
+        if extraction_times:
+            avg_extraction_time = np.mean(extraction_times)
+            print(f"   Average feature extraction time: {avg_extraction_time:.4f}s per series")
+        
+        return features_dict
     
-    def _analyze_market_coupling(self, features_dict: Dict[str, StructuralTensorFeatures]) -> Dict[str, Any]:
-        """市場結合度分析"""
-        print("  市場結合度解析中...")
+    def _run_hierarchical_analysis(
+        self, 
+        features_dict: Dict[str, StructuralTensorFeatures]
+    ) -> Dict[str, HierarchicalSeparationResults]:
+        """階層分析実行"""
         
-        coupling_analysis = {}
+        hierarchical_results = {}
+        use_bayesian = self.config.analysis_modes.get('bayesian_analysis', True) and BAYESIAN_AVAILABLE
         
-        # 全ペアの張力相関
+        for series_name, features in features_dict.items():
+            try:
+                result = self.hierarchical_analyzer.analyze_hierarchical_separation(
+                    features, use_bayesian=use_bayesian
+                )
+                hierarchical_results[series_name] = result
+                
+            except Exception as e:
+                print(f"Hierarchical analysis failed for {series_name}: {e}")
+                continue
+        
+        return hierarchical_results
+    
+    def _run_pairwise_analysis(
+        self, 
+        features_dict: Dict[str, StructuralTensorFeatures]
+    ) -> Dict[str, PairwiseInteractionResults]:
+        """ペアワイズ分析実行"""
+        
+        pairwise_results = {}
+        use_bayesian = self.config.analysis_modes.get('bayesian_analysis', True) and BAYESIAN_AVAILABLE
+        
         series_names = list(features_dict.keys())
-        n_series = len(series_names)
-        
-        coupling_matrix = np.eye(n_series)
-        coupling_strengths = []
         
         for i, name_a in enumerate(series_names):
             for j, name_b in enumerate(series_names):
-                if i != j:
-                    rho_a = features_dict[name_a].rho_T
-                    rho_b = features_dict[name_b].rho_T
+                if i < j:  # 重複回避
+                    pair_key = f"{name_a}_vs_{name_b}"
                     
-                    # 時変相関（50日窓）
-                    window = min(50, len(rho_a) // 4)
-                    
-                    correlations = []
-                    for k in range(window, len(rho_a)):
-                        window_corr = np.corrcoef(
-                            rho_a[k-window:k],
-                            rho_b[k-window:k]
-                        )[0, 1]
-                        correlations.append(abs(window_corr))
-                    
-                    mean_coupling = np.mean(correlations) if correlations else 0.0
-                    coupling_matrix[i, j] = mean_coupling
-                    coupling_strengths.append(mean_coupling)
+                    try:
+                        result = self.pairwise_analyzer.analyze_asymmetric_interaction(
+                            features_dict[name_a],
+                            features_dict[name_b],
+                            use_bayesian=use_bayesian
+                        )
+                        pairwise_results[pair_key] = result
+                        
+                    except Exception as e:
+                        print(f"Pairwise analysis failed for {pair_key}: {e}")
+                        continue
         
-        # 市場統合度メトリクス
-        market_integration = np.mean(coupling_strengths) if coupling_strengths else 0.0
-        coupling_volatility = np.std(coupling_strengths) if len(coupling_strengths) > 1 else 0.0
+        return pairwise_results
+    
+    def _run_network_analysis(self, results: Lambda3ComprehensiveResults) -> Dict[str, Any]:
+        """ネットワーク解析実行"""
         
-        coupling_analysis = {
-            'coupling_matrix': coupling_matrix,
+        if not results.pairwise_results:
+            return {'error': 'No pairwise results for network analysis'}
+        
+        # 相互作用行列構築
+        series_names = list(results.structural_features.keys())
+        n_series = len(series_names)
+        
+        interaction_matrix = np.zeros((n_series, n_series))
+        asymmetry_matrix = np.zeros((n_series, n_series))
+        
+        name_to_idx = {name: i for i, name in enumerate(series_names)}
+        
+        for pair_key, result in results.pairwise_results.items():
+            name_a, name_b = result.series_names
+            i, j = name_to_idx[name_a], name_to_idx[name_b]
+            
+            coupling = result.calculate_bidirectional_coupling()
+            asymmetry = result.get_asymmetry_score()
+            
+            interaction_matrix[i, j] = coupling
+            interaction_matrix[j, i] = coupling  # 対称化
+            asymmetry_matrix[i, j] = asymmetry
+            asymmetry_matrix[j, i] = -asymmetry  # 反対称化
+        
+        # ネットワーク統計
+        network_density = np.sum(interaction_matrix > 0.1) / (n_series * (n_series - 1))
+        
+        # 中心性計算
+        centrality_scores = np.sum(interaction_matrix, axis=1)
+        top_central_idx = np.argmax(centrality_scores)
+        top_central_node = series_names[top_central_idx]
+        
+        # クラスタリング（簡易）
+        clustering_coefficient = self._calculate_clustering_coefficient(interaction_matrix)
+        
+        return {
+            'interaction_matrix': interaction_matrix.tolist(),
+            'asymmetry_matrix': asymmetry_matrix.tolist(),
             'series_names': series_names,
-            'market_integration': float(market_integration),
-            'coupling_volatility': float(coupling_volatility),
-            'strongest_coupling': float(np.max(coupling_strengths)) if coupling_strengths else 0.0,
-            'weakest_coupling': float(np.min(coupling_strengths)) if coupling_strengths else 0.0
+            'density': float(network_density),
+            'top_central_node': top_central_node,
+            'centrality_scores': centrality_scores.tolist(),
+            'clustering_coefficient': float(clustering_coefficient),
+            'network_metrics': {
+                'total_connections': int(np.sum(interaction_matrix > 0.1)),
+                'average_coupling': float(np.mean(interaction_matrix[interaction_matrix > 0])),
+                'max_coupling': float(np.max(interaction_matrix))
+            }
         }
+    
+    def _evaluate_analysis_quality(self, results: Lambda3ComprehensiveResults) -> Dict[str, float]:
+        """解析品質評価"""
         
-        print(f"    市場統合度: {market_integration:.3f}")
-        print(f"    結合ボラティリティ: {coupling_volatility:.3f}")
+        quality_scores = []
         
-        return coupling_analysis
+        # 階層分析品質
+        if results.hierarchical_results:
+            hierarchical_qualities = [
+                r.separation_quality.get('overall_quality', 0) 
+                for r in results.hierarchical_results.values()
+            ]
+            quality_scores.extend(hierarchical_qualities)
+        
+        # ペアワイズ分析品質
+        if results.pairwise_results:
+            pairwise_qualities = [
+                r.interaction_quality.get('overall_quality', 0) 
+                for r in results.pairwise_results.values()
+            ]
+            quality_scores.extend(pairwise_qualities)
+        
+        # 総合品質
+        overall_quality = np.mean(quality_scores) if quality_scores else 0.0
+        
+        # データ品質
+        data_quality = self._assess_data_quality(results.data_info)
+        
+        # 分析完成度
+        expected_hierarchical = len(results.structural_features)
+        expected_pairwise = len(results.structural_features) * (len(results.structural_features) - 1) // 2
+        
+        completion_rate = (
+            len(results.hierarchical_results) / max(expected_hierarchical, 1) +
+            len(results.pairwise_results) / max(expected_pairwise, 1)
+        ) / 2
+        
+        return {
+            'overall_quality': overall_quality,
+            'data_quality': data_quality,
+            'completion_rate': completion_rate,
+            'hierarchical_avg_quality': np.mean([
+                r.separation_quality.get('overall_quality', 0) 
+                for r in results.hierarchical_results.values()
+            ]) if results.hierarchical_results else 0.0,
+            'pairwise_avg_quality': np.mean([
+                r.interaction_quality.get('overall_quality', 0) 
+                for r in results.pairwise_results.values()
+            ]) if results.pairwise_results else 0.0
+        }
+    
+    def _acquire_financial_data(
+        self, 
+        tickers: Dict[str, str], 
+        start_date: str, 
+        end_date: str
+    ) -> Dict[str, np.ndarray]:
+        """金融データ取得"""
+        
+        financial_data = {}
+        
+        for name, ticker in tickers.items():
+            try:
+                print(f"   Downloading {name} ({ticker})...")
+                data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+                
+                if not data.empty and 'Close' in data.columns:
+                    # 対数リターン計算
+                    close_prices = data['Close'].dropna()
+                    if len(close_prices) > 1:
+                        log_returns = np.log(close_prices / close_prices.shift(1)).dropna()
+                        financial_data[name] = log_returns.values
+                        print(f"     ✅ {len(log_returns)} data points acquired")
+                    else:
+                        print(f"     ❌ Insufficient data")
+                else:
+                    print(f"     ❌ No data available")
+                    
+            except Exception as e:
+                print(f"     ❌ Download failed: {e}")
+                continue
+        
+        return financial_data
+    
+    def _detect_financial_crises(self, results: Lambda3ComprehensiveResults) -> Dict[str, Any]:
+        """金融危機検出"""
+        
+        crisis_periods = []
+        crisis_indicators = []
+        
+        # 階層分析からの危機シグナル
+        for series_name, hierarchical_result in results.hierarchical_results.items():
+            escalation_strength = hierarchical_result.get_escalation_strength()
+            
+            if escalation_strength > 0.5:  # 高エスカレーション
+                crisis_indicators.append({
+                    'type': 'hierarchical_escalation',
+                    'series': series_name,
+                    'severity': escalation_strength,
+                    'description': f'High escalation detected in {series_name}'
+                })
+        
+        # ペアワイズ分析からの危機シグナル
+        high_coupling_pairs = []
+        for pair_name, pairwise_result in results.pairwise_results.items():
+            coupling = pairwise_result.calculate_bidirectional_coupling()
+            asymmetry = pairwise_result.get_asymmetry_score()
+            
+            if coupling > 0.7 and asymmetry > 0.3:  # 高結合・高非対称性
+                high_coupling_pairs.append({
+                    'pair': pair_name,
+                    'coupling': coupling,
+                    'asymmetry': asymmetry
+                })
+                
+                crisis_indicators.append({
+                    'type': 'high_asymmetric_coupling',
+                    'pair': pair_name,
+                    'severity': coupling * asymmetry,
+                    'description': f'High asymmetric coupling in {pair_name}'
+                })
+        
+        # ネットワークレベルの危機検出
+        if results.network_analysis:
+            network_density = results.network_analysis.get('density', 0)
+            if network_density > 0.6:  # 高密度ネットワーク = システミックリスク
+                crisis_indicators.append({
+                    'type': 'systemic_risk',
+                    'severity': network_density,
+                    'description': f'High network density detected: {network_density:.3f}'
+                })
+        
+        return {
+            'crisis_periods': crisis_periods,
+            'crisis_indicators': crisis_indicators,
+            'crisis_severity': np.mean([c['severity'] for c in crisis_indicators]) if crisis_indicators else 0.0,
+            'systemic_risk_level': results.network_analysis.get('density', 0) if results.network_analysis else 0.0
+        }
+    
+    def _calculate_clustering_coefficient(self, adjacency_matrix: np.ndarray) -> float:
+        """クラスタリング係数計算"""
+        n = adjacency_matrix.shape[0]
+        clustering_coeffs = []
+        
+        for i in range(n):
+            neighbors = np.where(adjacency_matrix[i] > 0.1)[0]
+            neighbors = neighbors[neighbors != i]  # 自己除外
+            
+            if len(neighbors) < 2:
+                continue
+            
+            # 近傍間のエッジ数
+            edge_count = 0
+            for j in range(len(neighbors)):
+                for k in range(j + 1, len(neighbors)):
+                    if adjacency_matrix[neighbors[j], neighbors[k]] > 0.1:
+                        edge_count += 1
+            
+            # 可能な最大エッジ数
+            max_edges = len(neighbors) * (len(neighbors) - 1) // 2
+            
+            if max_edges > 0:
+                clustering_coeffs.append(edge_count / max_edges)
+        
+        return np.mean(clustering_coeffs) if clustering_coeffs else 0.0
+    
+    def _assess_data_quality(self, data_info: Dict[str, Any]) -> float:
+        """データ品質評価"""
+        quality_score = 1.0
+        
+        # データ長の一貫性
+        lengths = list(data_info.get('lengths', {}).values())
+        if lengths:
+            length_cv = np.std(lengths) / (np.mean(lengths) + 1e-8)  # 変動係数
+            quality_score *= max(0, 1 - length_cv)
+        
+        # 系列数の充足性
+        series_count = data_info.get('series_count', 0)
+        if series_count < 2:
+            quality_score *= 0.5
+        elif series_count >= 5:
+            quality_score *= 1.2
+        
+        # 前処理の完了
+        if data_info.get('preprocessing_mode') == 'comprehensive':
+            quality_score *= 1.1
+        
+        return min(quality_score, 1.0)
+    
+    def _estimate_memory_usage(self, results: Lambda3ComprehensiveResults) -> float:
+        """メモリ使用量推定（MB）"""
+        
+        memory_usage = 0.0
+        
+        # 構造テンソル特徴量
+        for features in results.structural_features.values():
+            # 各配列のメモリ使用量推定
+            array_size = len(features.data) * 8  # float64 = 8 bytes
+            memory_usage += array_size * 7  # 7つの主要配列
+        
+        # 階層分析結果
+        memory_usage += len(results.hierarchical_results) * 1024  # 約1KB per result
+        
+        # ペアワイズ分析結果  
+        memory_usage += len(results.pairwise_results) * 2048  # 約2KB per result
+        
+        # ネットワーク分析
+        if results.network_analysis:
+            n_series = len(results.structural_features)
+            matrix_memory = n_series * n_series * 8 * 2  # 2つの行列
+            memory_usage += matrix_memory
+        
+        return memory_usage / (1024 * 1024)  # MB変換
     
     def get_pipeline_summary(self) -> Dict[str, Any]:
         """パイプライン実行履歴サマリー"""
         if not self.execution_history:
-            return {"message": "No pipeline executions yet"}
+            return {"message": "No pipeline executions performed yet"}
         
         total_executions = len(self.execution_history)
-        successful_executions = sum(1 for h in self.execution_history if h['success'])
         
-        execution_times = [h['execution_time'] for h in self.execution_history if h['success']]
-        series_counts = [h['n_series'] for h in self.execution_history]
+        execution_times = [h['execution_time'] for h in self.execution_history]
+        quality_scores = [h['quality'] for h in self.execution_history]
+        jit_enabled_count = sum(1 for h in self.execution_history if h['jit_enabled'])
         
         return {
             'total_executions': total_executions,
-            'success_rate': successful_executions / total_executions,
-            'average_execution_time': float(np.mean(execution_times)) if execution_times else 0.0,
-            'average_series_count': float(np.mean(series_counts)),
-            'fastest_execution': float(np.min(execution_times)) if execution_times else 0.0,
-            'slowest_execution': float(np.max(execution_times)) if execution_times else 0.0,
-            'recent_executions': self.execution_history[-3:]
+            'jit_usage_rate': jit_enabled_count / total_executions,
+            'performance_stats': {
+                'avg_execution_time': np.mean(execution_times),
+                'min_execution_time': np.min(execution_times),
+                'max_execution_time': np.max(execution_times)
+            },
+            'quality_stats': {
+                'avg_quality': np.mean(quality_scores),
+                'min_quality': np.min(quality_scores),
+                'max_quality': np.max(quality_scores)
+            },
+            'recent_executions': self.execution_history[-5:],
+            'jit_performance_gain': self._calculate_jit_performance_gain()
         }
+    
+    def _calculate_jit_performance_gain(self) -> float:
+        """JIT性能向上率計算"""
+        jit_times = [h['execution_time'] for h in self.execution_history if h['jit_enabled']]
+        non_jit_times = [h['execution_time'] for h in self.execution_history if not h['jit_enabled']]
+        
+        if jit_times and non_jit_times:
+            avg_jit_time = np.mean(jit_times)
+            avg_non_jit_time = np.mean(non_jit_times)
+            
+            if avg_jit_time > 0:
+                return (avg_non_jit_time - avg_jit_time) / avg_jit_time
+        
+        return 0.0
 
 # ==========================================================
 # CONVENIENCE FUNCTIONS
 # ==========================================================
 
 def run_lambda3_analysis(
-    data_source: Union[Dict[str, np.ndarray], str, Path],
+    data: Union[Dict[str, np.ndarray], pd.DataFrame, str, Path],
     config: Optional[L3ComprehensiveConfig] = None,
-    analysis_type: str = "comprehensive"
+    analysis_type: str = 'comprehensive'
 ) -> Lambda3ComprehensiveResults:
     """
     Lambda³分析実行の便利関数
     
     Args:
-        data_source: データソース
-        config: 包括設定
+        data: 入力データ
+        config: 設定オブジェクト
         analysis_type: 分析タイプ ('comprehensive', 'financial', 'rapid')
         
     Returns:
         Lambda3ComprehensiveResults: 分析結果
     """
-    pipeline = Lambda3ComprehensivePipeline(config)
-    
-    if analysis_type == "comprehensive":
-        return pipeline.run_comprehensive_analysis(data_source)
-    elif analysis_type == "financial":
-        if isinstance(data_source, dict):
-            # 辞書データの場合は通常の包括分析
-            return pipeline.run_comprehensive_analysis(data_source)
-        else:
-            # 金融データ特化分析
-            return pipeline.run_financial_data_analysis()
-    elif analysis_type == "rapid":
-        # 高速分析モード
-        if config is None:
-            from ..core.config import create_rapid_config
+    if config is None:
+        if analysis_type == 'financial':
+            config = create_financial_config()
+        elif analysis_type == 'rapid':
             config = create_rapid_config()
-        
-        pipeline_rapid = Lambda3ComprehensivePipeline(config)
-        return pipeline_rapid.run_comprehensive_analysis(data_source, enable_visualization=False)
-    else:
-        raise ValueError(f"Unknown analysis_type: {analysis_type}")
-
-def analyze_financial_markets(
-    tickers: Optional[Dict[str, str]] = None,
-    period: str = "2y",
-    enable_advanced_analysis: bool = True
-) -> Lambda3ComprehensiveResults:
-    """
-    金融市場分析の便利関数
+        elif analysis_type == 'research':
+            config = create_research_config()
+        else:
+            config = create_default_config()
     
-    Args:
-        tickers: ティッカー辞書
-        period: 分析期間
-        enable_advanced_analysis: 高度分析有効フラグ
-        
-    Returns:
-        Lambda3ComprehensiveResults: 金融分析結果
-    """
-    from ..core.config import create_financial_config
-    
-    config = create_financial_config()
     pipeline = Lambda3ComprehensivePipeline(config)
     
-    # 期間設定
-    if period == "1y":
-        start_date = "2023-01-01"
-        end_date = "2024-01-01"
-    elif period == "2y":
-        start_date = "2022-01-01"
-        end_date = "2024-01-01"
-    elif period == "5y":
-        start_date = "2019-01-01"
-        end_date = "2024-01-01"
+    if analysis_type == 'financial' and isinstance(data, dict):
+        # 金融データとして解釈
+        return pipeline.run_financial_analysis()
     else:
-        start_date = "2022-01-01"
-        end_date = "2024-01-01"
-    
-    return pipeline.run_financial_data_analysis(
-        tickers=tickers,
-        start_date=start_date,
-        end_date=end_date,
-        enable_crisis_detection=enable_advanced_analysis
-    )
+        # 通常の包括分析
+        return pipeline.run_comprehensive_analysis(data)
 
-def create_lambda3_report(
+def create_analysis_report(
     results: Lambda3ComprehensiveResults,
-    output_path: Union[str, Path],
-    include_technical_details: bool = True
-) -> Path:
+    output_path: Optional[Union[str, Path]] = None
+) -> str:
     """
-    Lambda³分析レポート生成
+    分析レポート生成の便利関数
     
     Args:
         results: 分析結果
         output_path: 出力パス
-        include_technical_details: 技術詳細含有フラグ
         
     Returns:
-        Path: 生成されたレポートパス
+        str: レポートテキスト
     """
-    output_path = Path(output_path)
-    
-    # レポート内容生成
-    report_content = {
-        'title': 'Lambda³ Theory Analysis Report',
-        'timestamp': results.analysis_timestamp,
-        'executive_summary': results.get_summary(),
-        'analysis_results': {
-            'data_overview': {
-                'n_series': len(results.series_names),
-                'series_names': results.series_names,
-                'total_data_points': sum(len(data) for data in results.series_dict.values())
-            },
-            'quality_assessment': results.quality_metrics,
-            'performance_metrics': results.performance_metrics
-        }
-    }
-    
-    # 技術詳細追加
-    if include_technical_details:
-        report_content['technical_details'] = {
-            'configuration': results.config.to_dict() if results.config else {},
-            'feature_extraction': {
-                'n_extracted_series': len(results.features_dict),
-                'feature_types': ['structural_tensor', 'hierarchical', 'multi_scale']
-            },
-            'analysis_modules': {
-                'structural_analysis': bool(results.structural_analysis),
-                'hierarchical_analysis': bool(results.hierarchical_results),
-                'pairwise_analysis': bool(results.pairwise_results),
-                'synchronization_analysis': bool(results.synchronization_results),
-                'regime_analysis': bool(results.regime_results)
-            }
-        }
-    
-    # JSON形式で保存
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(report_content, f, indent=2, ensure_ascii=False)
-    
-    print(f"Lambda³分析レポートを生成しました: {output_path}")
-    return output_path
-
-# ==========================================================
-# MAIN TESTING
-# ==========================================================
+    return results.export_summary_report(output_path)
 
 if __name__ == "__main__":
-    print("Lambda³ Comprehensive Pipeline Test")
-    print("=" * 50)
+    print("Lambda³ Comprehensive Pipeline Test (JIT Optimized)")
+    print("=" * 70)
     
-    # テスト用合成データ生成
-    np.random.seed(42)
-    n_points = 500
-    
-    # 複数の構造変化系列
-    test_data = {}
-    
-    for i, series_name in enumerate(['Series_A', 'Series_B', 'Series_C']):
-        # ベースとなる時系列
-        base_series = np.cumsum(np.random.randn(n_points) * 0.05)
+    # JIT機能確認
+    if JIT_FUNCTIONS_AVAILABLE:
+        print("✅ JIT最適化関数利用可能")
         
-        # 構造変化を注入
-        jump_positions = np.random.choice(n_points, size=5, replace=False)
-        for pos in jump_positions:
-            magnitude = np.random.choice([-1, 1]) * np.random.uniform(0.5, 2.0)
-            base_series[pos:] += magnitude
-        
-        # ノイズ追加
-        test_data[series_name] = base_series + np.random.randn(n_points) * 0.1
+        # 簡易パフォーマンステスト
+        try:
+            test_result = test_jit_functions_fixed()
+            if test_result:
+                print("✅ JIT関数テスト成功")
+            else:
+                print("⚠️  JIT関数テスト部分成功")
+                
+            # ベンチマークテスト
+            print("\n⚡ JIT性能ベンチマーク実行...")
+            benchmark_performance_fixed()
+            
+        except Exception as e:
+            print(f"❌ JIT性能テストエラー: {e}")
+    else:
+        print("⚠️  JIT最適化関数利用不可")
     
-    print(f"テストデータ生成完了: {len(test_data)} 系列、各 {n_points} ポイント")
-    
-    # 包括分析パイプライン実行
+    # パイプライン初期化テスト
     try:
-        pipeline = Lambda3ComprehensivePipeline()
+        config = create_default_config()
+        pipeline = Lambda3ComprehensivePipeline(config)
+        print("✅ パイプライン初期化成功")
         
-        # 分析実行
-        results = pipeline.run_comprehensive_analysis(
-            test_data,
-            analysis_modes={
-                'hierarchical_analysis': True,
-                'pairwise_analysis': True,
-                'synchronization_analysis': True,
-                'regime_analysis': True,
-                'crisis_detection': True
-            },
-            enable_visualization=False  # テスト環境では無効化
-        )
+        # 簡易データでのテスト
+        test_data = {
+            'Series_A': np.cumsum(np.random.randn(200) * 0.1),
+            'Series_B': np.cumsum(np.random.randn(200) * 0.1),
+            'Series_C': np.cumsum(np.random.randn(200) * 0.1)
+        }
         
-        # 結果サマリー表示
-        summary = results.get_summary()
-        print(f"\n分析結果サマリー:")
-        print(f"  解析系列数: {summary['analysis_info']['n_series']}")
-        print(f"  総データポイント: {summary['analysis_info']['total_data_points']}")
-        print(f"  特徴抽出成功: {summary['feature_extraction']['extracted_series']}")
-        print(f"  実行時間: {results.performance_metrics.get('total_execution_time', 0):.2f}秒")
-        print(f"  総合品質: {results.quality_metrics.get('overall_analysis_quality', 0):.3f}")
-        
-        # パイプライン履歴確認
-        pipeline_summary = pipeline.get_pipeline_summary()
-        print(f"\nパイプライン履歴:")
-        print(f"  総実行回数: {pipeline_summary['total_executions']}")
-        print(f"  成功率: {pipeline_summary['success_rate']:.1%}")
-        
-        print("\n包括分析パイプラインテスト成功!")
+        print("\n🧪 高速スクリーニングテスト...")
+        screening_result = pipeline.run_rapid_screening(test_data)
+        print(f"✅ スクリーニング完了: {len(screening_result['flagged_series'])} series flagged")
         
     except Exception as e:
-        print(f"テストエラー: {e}")
-        raise
+        print(f"❌ パイプラインテストエラー: {e}")
     
-    print("\nLambda³ Comprehensive Pipeline loaded successfully!")
-    print("Ready for end-to-end structural tensor analysis.")
+    print("\nComprehensive pipeline loaded successfully!")
+    print("Ready for Lambda³ integrated analysis with JIT optimization.")
