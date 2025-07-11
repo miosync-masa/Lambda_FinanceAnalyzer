@@ -1,7 +1,7 @@
 # ==========================================================
 # setup.py - Lambda³ Finance Analyzer Package Setup
 # 
-# Author: Mamichi Iizumi (Miosync, Inc.)
+# Author: Masamichi Iizumi (Miosync, Inc.)
 # License: MIT
 # 
 # 革新ポイント: JIT最適化とベイズ推定の統合パッケージ
@@ -54,18 +54,18 @@ LONG_DESCRIPTION = load_readme()
 VERSION = "1.0.0"
 
 # 作者情報
-AUTHOR = "Mamichi Iizumi"
-AUTHOR_EMAIL = "m.iizumi@miosync.com"
+AUTHOR = "Masamichi Iizumi"
+AUTHOR_EMAIL = "m.iizumi@miosync.email"
 MAINTAINER = "Miosync Research Team"
-MAINTAINER_EMAIL = "research@miosync.com"
+MAINTAINER_EMAIL = "info@miosync.email"
 
 # パッケージメタデータ
 PACKAGE_NAME = "lambda3"
 PACKAGE_DESCRIPTION = "Lambda³ Theory: Advanced Financial Analysis with Structural Tensors and JIT Optimization"
 
 # ホームページとリポジトリ
-URL = "https://github.com/miosync/lambda3-finance-analyzer"
-DOWNLOAD_URL = "https://github.com/miosync/lambda3-finance-analyzer/archive/v1.0.0.tar.gz"
+URL = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer"
+DOWNLOAD_URL = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/archive/v1.0.0.tar.gz"
 
 # 分類子（PyPI用）
 CLASSIFIERS = [
@@ -228,12 +228,9 @@ ENTRY_POINTS = {
 # プロジェクトURL
 PROJECT_URLS = {
     "Homepage": URL,
-    "Documentation": "https://lambda3-finance.readthedocs.io/",
-    "Repository": "https://github.com/miosync/lambda3-finance-analyzer",
-    "Bug Tracker": "https://github.com/miosync/lambda3-finance-analyzer/issues",
-    "Changelog": "https://github.com/miosync/lambda3-finance-analyzer/blob/main/CHANGELOG.md",
-    "Research Paper": "https://arxiv.org/abs/2024.lambda3.theory",
-    "Commercial Support": "https://miosync.com/lambda3-support",
+    "Repository": "https://github.com/miosync-masa/Lambda_FinanceAnalyzer",
+    "Bug Tracker": "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues",
+    "Discussions": "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/discussions",
 }
 
 # パッケージデータ
