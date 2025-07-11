@@ -1,0 +1,525 @@
+# ==========================================================
+# pyproject.toml - Lambda³ Finance Analyzer Modern Package Configuration
+# 
+# Author: Mamichi Iizumi (Miosync, Inc.)  
+# License: MIT
+#
+# 革新ポイント: PEP 518/621準拠の現代的パッケージ設定
+# ==========================================================
+
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel>=0.37.0",
+    "setuptools-scm>=6.0",
+    "numpy>=1.21.0",  # ビルド時にNumPyが必要（JIT最適化用）
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lambda3"
+dynamic = ["version"]
+description = "Lambda³ Theory: Advanced Financial Analysis with Structural Tensors and JIT Optimization"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.email"},
+]
+maintainers = [
+    {name = "Miosync Research Team", email = "info@miosync.email"},
+]
+keywords = [
+    "finance",
+    "quantitative-finance", 
+    "time-series-analysis",
+    "structural-tensors",
+    "lambda3-theory",
+    "jit-optimization",
+    "bayesian-analysis",
+    "crisis-detection",
+    "market-analysis",
+    "numba",
+    "mathematical-finance",
+]
+
+classifiers = [
+    # 開発状況
+    "Development Status :: 4 - Beta",
+    
+    # 対象ユーザー
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Science/Research", 
+    "Intended Audience :: Developers",
+    
+    # トピック
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    
+    # ライセンス
+    "License :: OSI Approved :: MIT License",
+    
+    # Python バージョン
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9", 
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    
+    # OS
+    "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux", 
+    "Operating System :: MacOS",
+    
+    # 環境
+    "Environment :: Console",
+    "Environment :: Jupyter",
+    "Natural Language :: English",
+    "Natural Language :: Japanese",
+]
+
+requires-python = ">=3.8"
+
+dependencies = [
+    # 数値計算基盤
+    "numpy>=1.21.0",
+    "scipy>=1.7.0", 
+    "pandas>=1.3.0",
+    
+    # JIT最適化（核心機能）
+    "numba>=0.56.0",
+    
+    # 基本可視化
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    
+    # ユーティリティ
+    "typing-extensions>=4.0.0",
+]
+
+[project.optional-dependencies]
+# ベイズ分析（高度統計機能）
+bayesian = [
+    "pymc>=5.0.0",
+    "arviz>=0.14.0", 
+    "theano-pymc>=1.1.0",
+]
+
+# 金融データ取得
+financial = [
+    "yfinance>=0.2.0",
+    "pandas-datareader>=0.10.0",
+    "quandl>=3.7.0",
+]
+
+# 高度可視化
+visualization = [
+    "plotly>=5.0.0",
+    "dash>=2.0.0",
+    "bokeh>=2.4.0", 
+    "ipywidgets>=7.6.0",
+]
+
+# ネットワーク分析
+network = [
+    "networkx>=2.6.0",
+    "igraph>=0.9.0",
+]
+
+# 機械学習拡張
+ml = [
+    "scikit-learn>=1.0.0",
+    "tensorflow>=2.8.0",
+    "torch>=1.11.0",
+]
+
+# 開発・テスト
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-benchmark>=4.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+    "sphinx>=4.5.0", 
+    "sphinx-rtd-theme>=1.0.0",
+    "pre-commit>=2.20.0",
+]
+
+# 性能分析
+performance = [
+    "memory-profiler>=0.60.0",
+    "line-profiler>=3.5.0", 
+    "py-spy>=0.3.0",
+]
+
+# Jupyter環境
+jupyter = [
+    "jupyter>=1.0.0",
+    "jupyterlab>=3.4.0",
+    "ipython>=8.0.0",
+    "notebook>=6.4.0",
+]
+
+# 完全インストール
+complete = [
+    "lambda3[bayesian,financial,visualization,network,ml,jupyter]"
+]
+
+# 最小インストール
+minimal = [
+    "lambda3[financial,visualization]"
+]
+
+[project.urls]
+Homepage = "https://github.com/miosync/lambda3-finance-analyzer"
+Documentation = "https://lambda3-finance.readthedocs.io/"
+Repository = "https://github.com/miosync/lambda3-finance-analyzer"
+"Bug Tracker" = "https://github.com/miosync/lambda3-finance-analyzer/issues"
+Changelog = "https://github.com/miosync/lambda3-finance-analyzer/blob/main/CHANGELOG.md"
+"Research Paper" = "https://arxiv.org/abs/2024.lambda3.theory"
+"Commercial Support" = "https://miosync.com/lambda3-support"
+
+[project.scripts]
+lambda3 = "lambda3.cli:main"
+lambda3-analyze = "lambda3.cli:analyze_command"
+lambda3-financial = "lambda3.cli:financial_command"
+lambda3-benchmark = "lambda3.cli:benchmark_command"
+
+# ==========================================================
+# TOOL CONFIGURATIONS - 開発ツール設定
+# ==========================================================
+
+[tool.setuptools]
+packages = ["lambda3"]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.dynamic]
+version = {attr = "lambda3.__version__"}
+
+[tool.setuptools.package-data]
+lambda3 = [
+    "data/*.json",
+    "data/*.csv", 
+    "configs/*.yaml",
+    "configs/*.toml",
+    "templates/*.html",
+    "static/css/*.css",
+    "static/js/*.js",
+]
+
+# Black コードフォーマッター
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+# isort インポート並び替え
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+known_first_party = ["lambda3"]
+known_third_party = ["numpy", "pandas", "matplotlib", "seaborn", "numba", "pymc", "arviz"]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+
+# MyPy 型チェック
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "numba.*",
+    "matplotlib.*",
+    "seaborn.*",
+    "yfinance.*",
+    "pandas_datareader.*",
+    "quandl.*",
+    "plotly.*",
+    "dash.*",
+    "bokeh.*",
+    "networkx.*",
+    "igraph.*",
+    "sklearn.*",
+    "tensorflow.*",
+    "torch.*",
+]
+ignore_missing_imports = true
+
+# Pytest テスト設定
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=lambda3",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "benchmark: marks tests as benchmark tests",
+    "jit: marks tests as JIT-related tests",
+    "bayesian: marks tests as Bayesian analysis tests",
+    "financial: marks tests as financial analysis tests",
+    "visualization: marks tests as visualization tests",
+]
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+# Coverage 設定
+[tool.coverage.run]
+source = ["lambda3"]
+omit = [
+    "tests/*",
+    "setup.py",
+    "lambda3/__init__.py",
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# Flake8 リント設定
+[tool.flake8]
+max-line-length = 100
+extend-ignore = [
+    "E203",  # whitespace before ':'
+    "E501",  # line too long (handled by black)
+    "W503",  # line break before binary operator
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "docs/source/conf.py",
+    "old",
+    "build",
+    "dist",
+    ".eggs",
+    "*.egg-info",
+    ".tox",
+    ".venv",
+    "venv",
+]
+per-file-ignores = [
+    "__init__.py:F401",  # imported but unused
+    "test_*.py:S101",    # assert used
+]
+
+# Bandit セキュリティ検査
+[tool.bandit]
+exclude_dirs = ["tests", "docs"]
+skips = ["B101", "B601"]  # assert_used, paramiko_calls
+
+# Pre-commit フック設定
+[tool.pre-commit]
+repos = [
+    {
+        repo = "https://github.com/pre-commit/pre-commit-hooks",
+        rev = "v4.4.0",
+        hooks = [
+            {id = "trailing-whitespace"},
+            {id = "end-of-file-fixer"},
+            {id = "check-yaml"},
+            {id = "check-added-large-files"},
+            {id = "check-toml"},
+            {id = "check-json"},
+        ]
+    },
+    {
+        repo = "https://github.com/psf/black",
+        rev = "22.12.0", 
+        hooks = [{id = "black"}]
+    },
+    {
+        repo = "https://github.com/pycqa/isort",
+        rev = "5.12.0",
+        hooks = [{id = "isort"}]
+    },
+    {
+        repo = "https://github.com/pycqa/flake8", 
+        rev = "6.0.0",
+        hooks = [{id = "flake8"}]
+    },
+    {
+        repo = "https://github.com/pre-commit/mirrors-mypy",
+        rev = "v0.991",
+        hooks = [{id = "mypy"}]
+    },
+]
+
+# ==========================================================
+# BUILD AND DISTRIBUTION - ビルド・配布設定
+# ==========================================================
+
+[tool.setuptools_scm]
+write_to = "lambda3/_version.py"
+version_scheme = "release-branch-semver"
+local_scheme = "dirty-tag"
+
+[tool.wheel]
+universal = false
+
+[tool.bdist_wheel]
+universal = false
+
+# ==========================================================
+# DOCUMENTATION - ドキュメント設定
+# ==========================================================
+
+[tool.sphinx]
+source-dir = "docs/source"
+build-dir = "docs/build"
+
+[tool.sphinx.extensions]
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary", 
+    "sphinx.ext.doctest",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.todo",
+    "sphinx.ext.coverage",
+    "sphinx.ext.mathjax",
+    "sphinx.ext.ifconfig",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.githubpages",
+    "sphinx.ext.napoleon",
+    "myst_parser",
+]
+
+# ==========================================================
+# JUPYTER BOOK - Jupyter Book設定（オプション）
+# ==========================================================
+
+[tool.jupyter-book]
+title = "Lambda³ Theory Documentation"
+author = "Mamichi Iizumi"
+logo = "docs/static/lambda3_logo.png"
+execute_notebooks = "force"
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
+
+[tool.jupyter-book.sphinx]
+config = {
+    html_theme = "sphinx_book_theme",
+    html_title = "Lambda³ Finance Analyzer",
+    html_logo = "static/lambda3_logo.png",
+}
+
+# ==========================================================
+# PERFORMANCE PROFILING - 性能プロファイリング設定  
+# ==========================================================
+
+[tool.py-spy]
+duration = 30
+rate = 100
+format = "flamegraph"
+output = "profiling/lambda3_profile.svg"
+
+[tool.memory-profiler]
+precision = 3
+backend = "psutil"
+
+# ==========================================================
+# DEVELOPMENT WORKFLOW - 開発ワークフロー設定
+# ==========================================================
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = py38,py39,py310,py311,py312,flake8,mypy,docs
+isolated_build = true
+
+[testenv]
+deps = 
+    pytest>=7.0.0
+    pytest-cov>=4.0.0
+    pytest-benchmark>=4.0.0
+commands = pytest {posargs}
+
+[testenv:flake8]
+deps = flake8>=4.0.0
+commands = flake8 lambda3 tests
+
+[testenv:mypy]
+deps = mypy>=0.950
+commands = mypy lambda3
+
+[testenv:docs]
+deps = 
+    sphinx>=4.5.0
+    sphinx-rtd-theme>=1.0.0
+commands = sphinx-build -W -b html docs/source docs/build
+"""
+
+# ==========================================================
+# METADATA - メタデータ
+# ==========================================================
+
+[project.entry-points."lambda3.plugins"]
+# プラグインシステム（将来の拡張用）
+core = "lambda3.core:plugin"
+analysis = "lambda3.analysis:plugin" 
+visualization = "lambda3.visualization:plugin"
