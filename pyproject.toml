@@ -1,7 +1,7 @@
 # ==========================================================
 # pyproject.toml - Lambda³ Finance Analyzer Modern Package Configuration
 # 
-# Author: Mamichi Iizumi (Miosync, Inc.)  
+# Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
 # 革新ポイント: PEP 518/621準拠の現代的パッケージ設定
@@ -23,10 +23,10 @@ description = "Lambda³ Theory: Advanced Financial Analysis with Structural Tens
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.com"},
+    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.email"},
 ]
 maintainers = [
-    {name = "Miosync Research Team", email = "research@miosync.com"},
+    {name = "Miosync Research Team", email = "info@miosync.email"},
 ]
 keywords = [
     "finance",
