@@ -1,328 +1,416 @@
 # ==========================================================
-# lambda3/analysis/hierarchical.py (修正版)
+# lambda3/analysis/hierarchical.py (階層分離ダイナミクス完全修正版)
 # Hierarchical Structure Analysis for Lambda³ Theory
+#
+# Author: Masamichi Iizumi (Miosync, Inc.)
+# License: MIT
+#
+# 完全修正版: エスカレーション/デエスカレーション、ベイズ階層モデル
 # ==========================================================
 
 """
-Lambda³理論階層構造解析モジュール（修正版）
+Lambda³階層構造分析（完全修正版）
 
-循環インポート問題を解決し、Protocol準拠による型安全性を確保した
-階層的構造変化解析の実装。
+構造テンソル(Λ)の階層的∆ΛC変化を検出し、エスカレーション/
+デエスカレーションダイナミクスを解析。短期・長期構造変化の
+分離と相互作用を完全にモデル化。
 
-修正点:
-- types.pyからのProtocolインポートによる循環回避
-- structural_tensor.pyからのインポート修正
-- JIT最適化関数との完全互換性確保
-- エラー耐性の向上
-
-Author: Masamichi Iizumi (Miosync, Inc.)
-License: MIT
+完全修正内容:
+- 階層分離係数の理論準拠計算
+- ベイズ階層モデルの完全実装
+- JIT関数との完全統合
+- 非対称性メトリクスの拡張
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Union, TYPE_CHECKING
+from typing import Dict, List, Tuple, Optional, Any, Union, Protocol
 from dataclasses import dataclass, field
 import warnings
 import time
+from datetime import datetime
 
-# ベイズ分析（オプション）
+# Bayesian analysis imports
 try:
     import pymc as pm
     import arviz as az
     BAYESIAN_AVAILABLE = True
 except ImportError:
     BAYESIAN_AVAILABLE = False
-    warnings.warn("PyMC not available. Bayesian analysis will be disabled.")
+    warnings.warn("PyMC not available. Bayesian analysis disabled.")
 
-# 型定義のインポート（循環回避）
+# JIT imports
 try:
-    from ..core.types import (
-        StructuralTensorProtocol,
-        HierarchicalResultProtocol,
-        ConfigProtocol,
-        FloatArray,
-        ArrayLike,
-        Lambda3Error,
-        ensure_float_array,
-        is_structural_tensor_compatible
+    from ..core.jit_functions import (
+        detect_local_global_jumps,
+        calculate_rho_t,
+        normalize_array_fixed,
+        moving_average_fixed
     )
-    TYPES_AVAILABLE = True
-except ImportError as e:
-    TYPES_AVAILABLE = False
-    warnings.warn(f"Types module not available: {e}")
-    # フォールバック
-    StructuralTensorProtocol = Any
-    HierarchicalResultProtocol = Any
-    Lambda3Error = Exception
+    JIT_AVAILABLE = True
+except ImportError:
+    JIT_AVAILABLE = False
+    warnings.warn("JIT functions not available.")
 
-# 設定のインポート
+# Configuration imports
 try:
-    from ..core.config import L3BaseConfig, L3HierarchicalConfig, L3BayesianConfig
+    from ..core.config import L3BaseConfig, L3HierarchicalConfig
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    # ダミー設定
-    class L3BaseConfig:
-        def __init__(self):
-            self.window = 10
-            self.threshold_percentile = 95.0
 
-# 構造テンソル（条件付きインポート）
-if TYPE_CHECKING:
-    from ..core.structural_tensor import StructuralTensorFeatures
-else:
-    try:
-        from ..core.structural_tensor import StructuralTensorFeatures
-        STRUCTURAL_TENSOR_AVAILABLE = True
-    except ImportError:
-        STRUCTURAL_TENSOR_AVAILABLE = False
-        warnings.warn("StructuralTensorFeatures not available - using Protocol")
-
-# JIT最適化関数のインポート（修正版）
+# Type imports
 try:
-    from ..core.jit_functions import (
-        calculate_tension_scalar_fixed,
-        normalize_array_fixed,
-        detect_hierarchical_jumps_fixed,
-        calculate_local_statistics_fixed,
-        safe_divide_fixed
-    )
-    JIT_FUNCTIONS_AVAILABLE = True
-    
-    # レガシー互換性
-    calculate_tension_scalar = calculate_tension_scalar_fixed
-    normalize_array = normalize_array_fixed
-    
+    from ..core.structural_tensor import StructuralTensorProtocol
+    from ..types.core import Lambda3Error
+    TYPES_AVAILABLE = True
 except ImportError:
-    JIT_FUNCTIONS_AVAILABLE = False
-    warnings.warn("JIT functions not available. Using fallback implementations.")
+    TYPES_AVAILABLE = False
+    StructuralTensorProtocol = Any
+    Lambda3Error = Exception
 
 # ==========================================================
-# 階層分析結果データクラス（Protocol準拠）
+# RESULTS DATACLASS - 階層分析結果
 # ==========================================================
 
 @dataclass
 class HierarchicalSeparationResults:
     """
-    階層分離分析結果（修正版）
+    階層分離分析結果（完全版）
     
-    HierarchicalResultProtocolに準拠し、循環インポートを回避した
-    階層分析結果の具体実装。
+    Lambda³理論: 構造変化のエスカレーション/デエスカレーション
+    ダイナミクスの完全な表現。
     """
     
-    # 基本識別子
+    # 基本識別情報
     series_name: str = "Series"
-    analysis_timestamp: str = field(default_factory=lambda: time.strftime("%Y%m%d_%H%M%S"))
+    analysis_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     
-    # 階層分離係数
-    escalation_strength: float = 0.0           # エスカレーション強度
-    deescalation_strength: float = 0.0         # デエスカレーション強度
-    hierarchy_correlation: float = 0.0         # 階層間相関
+    # 階層分離係数（核心）
+    escalation_strength: float = 0.0          # エスカレーション強度
+    deescalation_strength: float = 0.0        # デエスカレーション強度
+    hierarchy_correlation: float = 0.0        # 階層間相関
+    
+    # 階層効果係数
+    local_effect: float = 0.0                 # 短期構造効果
+    global_effect: float = 0.0                # 長期構造効果
     
     # 品質メトリクス
-    convergence_quality: float = 0.0           # 収束品質
-    statistical_significance: float = 0.0      # 統計的有意性
+    convergence_quality: float = 0.0          # 収束品質
+    statistical_significance: float = 0.0     # 統計的有意性
     
-    # 詳細分析結果
+    # 詳細係数
     separation_coefficients: Dict[str, Dict[str, float]] = field(default_factory=dict)
     asymmetry_metrics: Dict[str, float] = field(default_factory=dict)
     hierarchy_stats: Dict[str, float] = field(default_factory=dict)
     
+    # ベイズ分析結果
+    bayesian_trace: Optional[Any] = None
+    bayesian_summary: Optional[Dict[str, Any]] = None
+    
     # メタデータ
-    analysis_method: str = "standard"          # 分析手法
-    bayesian_trace: Optional[Any] = None       # ベイズトレース
-    processing_time: float = 0.0               # 処理時間
+    analysis_method: str = "standard"
+    processing_time: float = 0.0
+    config_params: Dict[str, Any] = field(default_factory=dict)
+    
+    def get_escalation_strength(self) -> float:
+        """エスカレーション強度取得"""
+        return self.escalation_strength
+    
+    def get_deescalation_strength(self) -> float:
+        """デエスカレーション強度取得"""
+        return self.deescalation_strength
+    
+    def get_dominant_hierarchy(self) -> str:
+        """優勢階層判定"""
+        if abs(self.escalation_strength) > abs(self.deescalation_strength) * 1.2:
+            return 'escalation_dominant'
+        elif abs(self.deescalation_strength) > abs(self.escalation_strength) * 1.2:
+            return 'deescalation_dominant'
+        else:
+            return 'balanced'
     
     def get_separation_summary(self) -> Dict[str, float]:
-        """分離サマリー取得"""
+        """分離サマリー"""
         return {
             'escalation': self.escalation_strength,
             'deescalation': self.deescalation_strength,
             'correlation': self.hierarchy_correlation,
-            'quality': self.convergence_quality
+            'local_effect': self.local_effect,
+            'global_effect': self.global_effect,
+            'quality': self.convergence_quality,
+            'significance': self.statistical_significance
         }
     
-    def get_dominant_hierarchy(self) -> str:
-        """優勢階層判定"""
-        if self.escalation_strength > self.deescalation_strength * 1.2:
-            return 'global'
-        elif self.deescalation_strength > self.escalation_strength * 1.2:
-            return 'local'
-        else:
-            return 'balanced'
-    
-    def get_escalation_strength(self) -> float:
-        """エスカレーション強度取得（互換性）"""
-        return self.escalation_strength
-    
-    def get_deescalation_strength(self) -> float:
-        """デエスカレーション強度取得（互換性）"""
-        return self.deescalation_strength
-    
     def to_dict(self) -> Dict[str, Any]:
-        """辞書形式変換"""
+        """辞書変換"""
         return {
             'series_name': self.series_name,
             'analysis_timestamp': self.analysis_timestamp,
-            'escalation_strength': self.escalation_strength,
-            'deescalation_strength': self.deescalation_strength,
-            'hierarchy_correlation': self.hierarchy_correlation,
-            'convergence_quality': self.convergence_quality,
-            'statistical_significance': self.statistical_significance,
+            'separation_summary': self.get_separation_summary(),
             'dominant_hierarchy': self.get_dominant_hierarchy(),
+            'asymmetry_metrics': self.asymmetry_metrics,
+            'hierarchy_stats': self.hierarchy_stats,
             'analysis_method': self.analysis_method,
             'processing_time': self.processing_time
         }
 
 # ==========================================================
-# 階層分析器クラス（修正版）
+# HIERARCHICAL ANALYZER - 階層分析器
 # ==========================================================
 
 class HierarchicalAnalyzer:
     """
-    Lambda³階層構造分析器（修正版）
+    Lambda³階層構造分析器（完全版）
     
-    Protocol準拠による型安全性を確保し、循環インポートを回避した
-    階層的構造変化分析のメインエンジン。
+    短期・長期構造変化の分離、エスカレーション/デエスカレーション
+    ダイナミクスの包括的解析。
     """
     
     def __init__(self, config: Optional[Any] = None, use_jit: Optional[bool] = None):
         """
         Args:
-            config: 設定オブジェクト
-            use_jit: JIT最適化使用フラグ
+            config: 階層分析設定
+            use_jit: JIT使用フラグ
         """
-        # 設定の初期化
-        if config is None:
-            if CONFIG_AVAILABLE:
-                self.config = L3BaseConfig()
-            else:
-                # フォールバック設定
-                self.config = type('Config', (), {
-                    'window': 10,
-                    'threshold_percentile': 95.0,
-                    'local_window': 5,
-                    'global_window': 30
-                })()
-        else:
-            self.config = config
+        self.config = self._initialize_config(config)
+        self.use_jit = use_jit if use_jit is not None else JIT_AVAILABLE
         
-        # JIT使用判定
-        if use_jit is None:
-            self.use_jit = JIT_FUNCTIONS_AVAILABLE and getattr(self.config, 'enable_jit', True)
-        else:
-            self.use_jit = use_jit and JIT_FUNCTIONS_AVAILABLE
+    def _initialize_config(self, config: Optional[Any]) -> Any:
+        """設定初期化"""
+        if config is not None:
+            return config
         
-        print(f"HierarchicalAnalyzer initialized: JIT={self.use_jit}")
+        if CONFIG_AVAILABLE:
+            return L3HierarchicalConfig()
+        else:
+            # フォールバック設定
+            return type('Config', (), {
+                'local_window': 5,
+                'global_window': 30,
+                'local_percentile': 90.0,
+                'global_percentile': 95.0,
+                'min_events_threshold': 10,
+                'bayesian_draws': 4000,
+                'bayesian_tune': 2000
+            })()
     
     def analyze_hierarchical_separation(
         self,
-        features: StructuralTensorProtocol,
-        use_bayesian: bool = False
+        features: Union[StructuralTensorProtocol, Dict[str, np.ndarray]],
+        use_bayesian: bool = False,
+        data: Optional[np.ndarray] = None
     ) -> HierarchicalSeparationResults:
         """
-        階層分離分析実行
+        階層分離分析の実行
         
         Args:
-            features: 構造テンソル特徴量（Protocol準拠）
+            features: 構造テンソル特徴量
             use_bayesian: ベイズ分析使用フラグ
+            data: 元データ（特徴量に含まれない場合）
             
         Returns:
             HierarchicalSeparationResults: 階層分析結果
         """
         start_time = time.time()
         
-        # 入力検証
-        self._validate_input(features)
+        # データと特徴量の準備
+        data_array, series_name, hierarchical_features = self._prepare_analysis_data(
+            features, data
+        )
         
+        print(f"\n{'='*60}")
+        print(f"HIERARCHICAL SEPARATION ANALYSIS: {series_name}")
+        print(f"{'='*60}")
+        
+        # 階層的イベントの統計
+        self._print_hierarchical_stats(hierarchical_features)
+        
+        # 分析手法の選択と実行
+        if use_bayesian and BAYESIAN_AVAILABLE:
+            results = self._analyze_bayesian(
+                data_array, hierarchical_features, series_name
+            )
+        else:
+            results = self._analyze_standard(
+                data_array, hierarchical_features, series_name
+            )
+        
+        # 処理時間記録
+        results.processing_time = time.time() - start_time
+        
+        print(f"\nAnalysis completed in {results.processing_time:.2f} seconds")
+        self._print_results_summary(results)
+        
+        return results
+    
+    def _prepare_analysis_data(
+        self,
+        features: Union[StructuralTensorProtocol, Dict[str, np.ndarray]],
+        data: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, str, Dict[str, np.ndarray]]:
+        """分析データの準備"""
         # データ取得
-        data, series_name = self._extract_data_from_features(features)
-        
-        print(f"Analyzing hierarchical separation for {series_name}...")
-        
-        try:
-            if use_bayesian and BAYESIAN_AVAILABLE:
-                # ベイズ階層分析
-                results = self._analyze_with_bayesian(features, data, series_name)
-            else:
-                # 標準階層分析
-                results = self._analyze_standard(features, data, series_name)
-            
-            # 処理時間記録
-            results.processing_time = time.time() - start_time
-            
-            return results
-            
-        except Exception as e:
-            raise Lambda3Error(f"Hierarchical analysis failed for {series_name}: {e}")
-    
-    def _validate_input(self, features: StructuralTensorProtocol):
-        """入力検証"""
-        if TYPES_AVAILABLE:
-            if not is_structural_tensor_compatible(features):
-                raise Lambda3Error("Input is not compatible with StructuralTensorProtocol")
-        
-        # データの存在確認
         if hasattr(features, 'data'):
-            if len(features.data) < 10:
-                raise Lambda3Error("Insufficient data for hierarchical analysis")
-        elif hasattr(features, '__getitem__'):
-            if len(features) < 10:
-                raise Lambda3Error("Insufficient data for hierarchical analysis")
-    
-    def _extract_data_from_features(self, features: StructuralTensorProtocol) -> Tuple[np.ndarray, str]:
-        """特徴量からデータ抽出"""
-        
-        # データの取得
-        if hasattr(features, 'data'):
-            data = features.data
+            data_array = features.data
             series_name = getattr(features, 'series_name', 'Series')
-        elif hasattr(features, '__getitem__') and 'data' in features:
-            data = features['data']
+        elif isinstance(features, dict) and 'data' in features:
+            data_array = features['data']
             series_name = features.get('series_name', 'Series')
-        else:
-            # フォールバック：features自体をデータとして扱う
-            data = np.asarray(features)
+        elif data is not None:
+            data_array = data
             series_name = 'Series'
-        
-        # 型安全性確保
-        if TYPES_AVAILABLE:
-            data = ensure_float_array(data)
         else:
-            data = np.asarray(data, dtype=np.float64)
+            raise ValueError("No data found in features or provided")
         
-        return data, series_name
+        # 階層的特徴量の取得または計算
+        hierarchical_features = self._extract_hierarchical_features(features, data_array)
+        
+        return data_array, series_name, hierarchical_features
+    
+    def _extract_hierarchical_features(
+        self,
+        features: Union[StructuralTensorProtocol, Dict[str, np.ndarray]],
+        data: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        """階層的特徴量の抽出"""
+        # 既存の階層的特徴量をチェック
+        required_features = ['local_pos', 'local_neg', 'global_pos', 'global_neg']
+        
+        if hasattr(features, 'local_pos'):
+            # オブジェクトから取得
+            hier_features = {
+                feat: getattr(features, feat) for feat in required_features
+                if hasattr(features, feat)
+            }
+        elif isinstance(features, dict):
+            # 辞書から取得
+            hier_features = {
+                feat: features[feat] for feat in required_features
+                if feat in features
+            }
+        else:
+            hier_features = {}
+        
+        # 不足している場合は計算
+        if len(hier_features) < 4:
+            if self.use_jit and JIT_AVAILABLE:
+                local_pos, local_neg, global_pos, global_neg = detect_local_global_jumps(
+                    data,
+                    self.config.local_window,
+                    self.config.global_window,
+                    self.config.local_percentile,
+                    self.config.global_percentile
+                )
+                hier_features = {
+                    'local_pos': local_pos,
+                    'local_neg': local_neg,
+                    'global_pos': global_pos,
+                    'global_neg': global_neg
+                }
+            else:
+                # 純Python実装
+                hier_features = self._compute_hierarchical_features_python(data)
+        
+        # 張力スカラーも含める
+        if hasattr(features, 'rho_T'):
+            hier_features['rho_T'] = features.rho_T
+        elif isinstance(features, dict) and 'rho_T' in features:
+            hier_features['rho_T'] = features['rho_T']
+        else:
+            if self.use_jit and JIT_AVAILABLE:
+                hier_features['rho_T'] = calculate_rho_t(data, 10)
+            else:
+                hier_features['rho_T'] = self._calculate_rho_t_python(data)
+        
+        return hier_features
+    
+    def _compute_hierarchical_features_python(self, data: np.ndarray) -> Dict[str, np.ndarray]:
+        """純Python版階層的特徴量計算"""
+        n = len(data)
+        diff = np.diff(data, prepend=data[0])
+        
+        # ローカル検出
+        local_pos = np.zeros(n)
+        local_neg = np.zeros(n)
+        
+        for i in range(n):
+            local_start = max(0, i - self.config.local_window)
+            local_end = min(n, i + self.config.local_window + 1)
+            local_subset = np.abs(diff[local_start:local_end])
+            
+            if len(local_subset) > 0:
+                local_threshold = np.percentile(local_subset, self.config.local_percentile)
+                if diff[i] > local_threshold:
+                    local_pos[i] = 1.0
+                elif diff[i] < -local_threshold:
+                    local_neg[i] = 1.0
+        
+        # グローバル検出
+        global_threshold = np.percentile(np.abs(diff), self.config.global_percentile)
+        global_pos = (diff > global_threshold).astype(float)
+        global_neg = (diff < -global_threshold).astype(float)
+        
+        return {
+            'local_pos': local_pos,
+            'local_neg': local_neg,
+            'global_pos': global_pos,
+            'global_neg': global_neg
+        }
+    
+    def _calculate_rho_t_python(self, data: np.ndarray) -> np.ndarray:
+        """純Python版張力スカラー計算"""
+        window = 10
+        rho_t = np.zeros(len(data))
+        
+        for i in range(len(data)):
+            start = max(0, i - window)
+            end = i + 1
+            subset = data[start:end]
+            rho_t[i] = np.std(subset) if len(subset) > 1 else 0.0
+        
+        return rho_t
+    
+    def _print_hierarchical_stats(self, features: Dict[str, np.ndarray]):
+        """階層統計の表示"""
+        local_events = np.sum(features['local_pos']) + np.sum(features['local_neg'])
+        global_events = np.sum(features['global_pos']) + np.sum(features['global_neg'])
+        
+        print(f"\nHierarchical Event Statistics:")
+        print(f"  Local events:  {int(local_events)} (Pos: {int(np.sum(features['local_pos']))}, Neg: {int(np.sum(features['local_neg']))})")
+        print(f"  Global events: {int(global_events)} (Pos: {int(np.sum(features['global_pos']))}, Neg: {int(np.sum(features['global_neg']))})")
+        print(f"  Mean tension:  {np.mean(features['rho_T']):.4f}")
     
     def _analyze_standard(
         self,
-        features: StructuralTensorProtocol,
         data: np.ndarray,
+        features: Dict[str, np.ndarray],
         series_name: str
     ) -> HierarchicalSeparationResults:
         """標準階層分析"""
-        
-        print(f"Running standard hierarchical analysis for {series_name}")
-        
-        # 階層的特徴量の取得
-        local_features, global_features = self._extract_hierarchical_features(features, data)
+        print("\nPerforming standard hierarchical analysis...")
         
         # 階層分離係数の計算
-        separation_coeffs = self._calculate_separation_coefficients(local_features, global_features)
+        separation_coeffs = self._calculate_separation_coefficients(features)
         
-        # 非対称性メトリクスの計算
-        asymmetry_metrics = self._calculate_asymmetry_metrics(local_features, global_features)
+        # 階層効果の計算
+        hierarchy_effects = self._calculate_hierarchy_effects(features)
         
-        # 階層統計の計算
-        hierarchy_stats = self._calculate_hierarchy_statistics(local_features, global_features)
+        # 非対称性メトリクス
+        asymmetry_metrics = self._calculate_asymmetry_metrics(features)
+        
+        # 階層統計
+        hierarchy_stats = self._calculate_hierarchy_statistics(features)
         
         # 結果構築
         results = HierarchicalSeparationResults(
             series_name=series_name,
-            escalation_strength=separation_coeffs.get('escalation', 0.0),
-            deescalation_strength=separation_coeffs.get('deescalation', 0.0),
-            hierarchy_correlation=separation_coeffs.get('correlation', 0.0),
+            escalation_strength=separation_coeffs['escalation'],
+            deescalation_strength=separation_coeffs['deescalation'],
+            hierarchy_correlation=separation_coeffs['correlation'],
+            local_effect=hierarchy_effects['local'],
+            global_effect=hierarchy_effects['global'],
             convergence_quality=0.8,  # 標準分析では固定値
-            statistical_significance=0.7,  # 標準分析では固定値
+            statistical_significance=0.7,
             separation_coefficients={'standard': separation_coeffs},
             asymmetry_metrics=asymmetry_metrics,
             hierarchy_stats=hierarchy_stats,
@@ -331,216 +419,122 @@ class HierarchicalAnalyzer:
         
         return results
     
-    def _analyze_with_bayesian(
+    def _analyze_bayesian(
         self,
-        features: StructuralTensorProtocol,
         data: np.ndarray,
+        features: Dict[str, np.ndarray],
         series_name: str
     ) -> HierarchicalSeparationResults:
         """ベイズ階層分析"""
-        
-        print(f"Running Bayesian hierarchical analysis for {series_name}")
-        
-        # 階層的特徴量の取得
-        local_features, global_features = self._extract_hierarchical_features(features, data)
+        print("\nPerforming Bayesian hierarchical analysis...")
         
         # ベイズモデル構築と推定
-        trace, model = self._fit_bayesian_hierarchical_model(local_features, global_features)
+        trace, model = self._fit_bayesian_hierarchical_model(data, features)
         
-        # ベイズ結果から係数抽出
-        separation_coeffs = self._extract_bayesian_coefficients(trace)
+        # 係数抽出
+        bayesian_coeffs = self._extract_bayesian_coefficients(trace)
         
-        # 品質メトリクス計算
-        convergence_quality = self._assess_bayesian_convergence(trace)
+        # 品質評価
+        convergence_quality = self._assess_convergence_quality(trace)
         statistical_significance = self._assess_statistical_significance(trace)
         
-        # 非対称性メトリクス
-        asymmetry_metrics = self._calculate_asymmetry_metrics(local_features, global_features)
-        
-        # 階層統計
-        hierarchy_stats = self._calculate_hierarchy_statistics(local_features, global_features)
+        # 標準メトリクスも計算
+        asymmetry_metrics = self._calculate_asymmetry_metrics(features)
+        hierarchy_stats = self._calculate_hierarchy_statistics(features)
         
         # 結果構築
         results = HierarchicalSeparationResults(
             series_name=series_name,
-            escalation_strength=separation_coeffs.get('escalation', 0.0),
-            deescalation_strength=separation_coeffs.get('deescalation', 0.0),
-            hierarchy_correlation=separation_coeffs.get('correlation', 0.0),
+            escalation_strength=bayesian_coeffs['escalation'],
+            deescalation_strength=bayesian_coeffs['deescalation'],
+            hierarchy_correlation=bayesian_coeffs['correlation'],
+            local_effect=bayesian_coeffs['local_effect'],
+            global_effect=bayesian_coeffs['global_effect'],
             convergence_quality=convergence_quality,
             statistical_significance=statistical_significance,
-            separation_coefficients={'bayesian': separation_coeffs},
+            separation_coefficients={'bayesian': bayesian_coeffs},
             asymmetry_metrics=asymmetry_metrics,
             hierarchy_stats=hierarchy_stats,
             analysis_method='bayesian',
-            bayesian_trace=trace
+            bayesian_trace=trace,
+            bayesian_summary=az.summary(trace).to_dict()
         )
         
         return results
     
-    def _extract_hierarchical_features(
-        self,
-        features: StructuralTensorProtocol,
-        data: np.ndarray
-    ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """階層的特徴量の抽出"""
-        
-        # 既存の階層的特徴量を確認
-        hierarchical_attrs = ['local_pos', 'local_neg', 'global_pos', 'global_neg']
-        has_hierarchical = False
-        
-        if hasattr(features, 'local_pos'):
-            has_hierarchical = all(getattr(features, attr, None) is not None for attr in hierarchical_attrs)
-        elif isinstance(features, dict):
-            has_hierarchical = all(attr in features and features[attr] is not None for attr in hierarchical_attrs)
-        
-        if has_hierarchical:
-            # 既存の階層的特徴量を使用
-            if hasattr(features, 'local_pos'):
-                local_features = {
-                    'pos': features.local_pos,
-                    'neg': features.local_neg
-                }
-                global_features = {
-                    'pos': features.global_pos,
-                    'neg': features.global_neg
-                }
-            else:
-                local_features = {
-                    'pos': features['local_pos'],
-                    'neg': features['local_neg']
-                }
-                global_features = {
-                    'pos': features['global_pos'],
-                    'neg': features['global_neg']
-                }
-        else:
-            # 階層的特徴量を動的に計算
-            local_features, global_features = self._compute_hierarchical_features(data)
-        
-        return local_features, global_features
-    
-    def _compute_hierarchical_features(self, data: np.ndarray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """階層的特徴量の動的計算"""
-        
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            # JIT最適化版
-            return self._compute_hierarchical_features_jit(data)
-        else:
-            # Pure Python版
-            return self._compute_hierarchical_features_python(data)
-    
-    def _compute_hierarchical_features_jit(self, data: np.ndarray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """JIT最適化階層特徴量計算"""
-        
-        try:
-            local_window = getattr(self.config, 'local_window', 5)
-            global_window = getattr(self.config, 'global_window', 30)
-            
-            # JIT関数で階層的ジャンプ検出
-            local_pos, local_neg, global_pos, global_neg = detect_hierarchical_jumps_fixed(
-                data, local_window, global_window, 90.0, 95.0
-            )
-            
-            local_features = {
-                'pos': local_pos.astype(np.float64),
-                'neg': local_neg.astype(np.float64)
-            }
-            
-            global_features = {
-                'pos': global_pos.astype(np.float64),
-                'neg': global_neg.astype(np.float64)
-            }
-            
-            return local_features, global_features
-            
-        except Exception as e:
-            print(f"JIT hierarchical computation failed: {e}, falling back to Python")
-            return self._compute_hierarchical_features_python(data)
-    
-    def _compute_hierarchical_features_python(self, data: np.ndarray) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
-        """Pure Python階層特徴量計算"""
-        
-        n = len(data)
-        diff = np.diff(data, prepend=data[0])
-        
-        # 窓サイズ設定
-        local_window = getattr(self.config, 'local_window', 5)
-        global_window = getattr(self.config, 'global_window', 30)
-        
-        # 局所特徴量
-        local_pos = np.zeros(n, dtype=np.float64)
-        local_neg = np.zeros(n, dtype=np.float64)
-        
-        for i in range(n):
-            start = max(0, i - local_window)
-            end = min(n, i + local_window + 1)
-            local_threshold = np.percentile(np.abs(diff[start:end]), 90.0)
-            
-            if diff[i] > local_threshold:
-                local_pos[i] = 1.0
-            elif diff[i] < -local_threshold:
-                local_neg[i] = 1.0
-        
-        # 大域特徴量
-        global_threshold = np.percentile(np.abs(diff), 95.0)
-        global_pos = (diff > global_threshold).astype(np.float64)
-        global_neg = (diff < -global_threshold).astype(np.float64)
-        
-        local_features = {'pos': local_pos, 'neg': local_neg}
-        global_features = {'pos': global_pos, 'neg': global_neg}
-        
-        return local_features, global_features
-    
     def _calculate_separation_coefficients(
         self,
-        local_features: Dict[str, np.ndarray],
-        global_features: Dict[str, np.ndarray]
+        features: Dict[str, np.ndarray]
     ) -> Dict[str, float]:
-        """分離係数計算"""
+        """階層分離係数の計算"""
+        # エスカレーション: ローカル→グローバル
+        local_events = features['local_pos'] + features['local_neg']
+        global_events = features['global_pos'] + features['global_neg']
         
-        # イベント数計算
-        local_events = np.sum(local_features['pos']) + np.sum(local_features['neg'])
-        global_events = np.sum(global_features['pos']) + np.sum(global_features['neg'])
-        total_events = local_events + global_events
+        # 時間差を考慮したエスカレーション検出
+        escalation_count = 0
+        deescalation_count = 0
         
-        # 分離係数
-        if total_events > 0:
-            escalation = global_events / total_events  # 局所→大域
-            deescalation = local_events / total_events  # 大域→局所
-        else:
-            escalation = 0.0
-            deescalation = 0.0
+        for i in range(1, len(local_events)-1):
+            # エスカレーション: ローカルイベント後にグローバルイベント
+            if local_events[i-1] > 0 and global_events[i] > 0:
+                escalation_count += 1
+            
+            # デエスカレーション: グローバルイベント後にローカルのみ
+            if global_events[i-1] > 0 and local_events[i] > 0 and global_events[i] == 0:
+                deescalation_count += 1
         
-        # 相関係数
-        local_total = local_features['pos'] + local_features['neg']
-        global_total = global_features['pos'] + global_features['neg']
+        total_transitions = max(escalation_count + deescalation_count, 1)
         
-        if np.var(local_total) > 0 and np.var(global_total) > 0:
-            correlation = np.corrcoef(local_total, global_total)[0, 1]
+        # 階層間相関
+        if np.sum(local_events) > 0 and np.sum(global_events) > 0:
+            correlation = np.corrcoef(local_events, global_events)[0, 1]
         else:
             correlation = 0.0
         
         return {
-            'escalation': escalation,
-            'deescalation': deescalation,
-            'correlation': correlation
+            'escalation': escalation_count / total_transitions,
+            'deescalation': deescalation_count / total_transitions,
+            'correlation': correlation,
+            'escalation_count': escalation_count,
+            'deescalation_count': deescalation_count
+        }
+    
+    def _calculate_hierarchy_effects(
+        self,
+        features: Dict[str, np.ndarray]
+    ) -> Dict[str, float]:
+        """階層効果の計算"""
+        rho_t = features['rho_T']
+        local_events = features['local_pos'] + features['local_neg']
+        global_events = features['global_pos'] + features['global_neg']
+        
+        # イベント時の張力効果
+        local_tension = np.mean(rho_t[local_events > 0]) if np.any(local_events > 0) else 0
+        global_tension = np.mean(rho_t[global_events > 0]) if np.any(global_events > 0) else 0
+        baseline_tension = np.mean(rho_t)
+        
+        return {
+            'local': (local_tension - baseline_tension) / (baseline_tension + 1e-8),
+            'global': (global_tension - baseline_tension) / (baseline_tension + 1e-8),
+            'local_tension': local_tension,
+            'global_tension': global_tension,
+            'baseline_tension': baseline_tension
         }
     
     def _calculate_asymmetry_metrics(
         self,
-        local_features: Dict[str, np.ndarray],
-        global_features: Dict[str, np.ndarray]
+        features: Dict[str, np.ndarray]
     ) -> Dict[str, float]:
-        """非対称性メトリクス計算"""
+        """非対称性メトリクスの計算"""
+        # 正負イベントの非対称性
+        local_pos_count = np.sum(features['local_pos'])
+        local_neg_count = np.sum(features['local_neg'])
+        global_pos_count = np.sum(features['global_pos'])
+        global_neg_count = np.sum(features['global_neg'])
         
-        # 正負の非対称性（局所）
-        local_pos_count = np.sum(local_features['pos'])
-        local_neg_count = np.sum(local_features['neg'])
+        # 非対称性指標
         local_asymmetry = (local_pos_count - local_neg_count) / max(local_pos_count + local_neg_count, 1)
-        
-        # 正負の非対称性（大域）
-        global_pos_count = np.sum(global_features['pos'])
-        global_neg_count = np.sum(global_features['neg'])
         global_asymmetry = (global_pos_count - global_neg_count) / max(global_pos_count + global_neg_count, 1)
         
         # 階層間非対称性
@@ -549,118 +543,162 @@ class HierarchicalAnalyzer:
         return {
             'local_asymmetry': local_asymmetry,
             'global_asymmetry': global_asymmetry,
-            'hierarchy_asymmetry': hierarchy_asymmetry
+            'hierarchy_asymmetry': hierarchy_asymmetry,
+            'local_pos_ratio': local_pos_count / max(local_pos_count + local_neg_count, 1),
+            'global_pos_ratio': global_pos_count / max(global_pos_count + global_neg_count, 1)
         }
     
     def _calculate_hierarchy_statistics(
         self,
-        local_features: Dict[str, np.ndarray],
-        global_features: Dict[str, np.ndarray]
+        features: Dict[str, np.ndarray]
     ) -> Dict[str, float]:
-        """階層統計計算"""
+        """階層統計の計算"""
+        local_events = features['local_pos'] + features['local_neg']
+        global_events = features['global_pos'] + features['global_neg']
         
-        # 強度統計
-        local_intensity = np.mean(local_features['pos'] + local_features['neg'])
-        global_intensity = np.mean(global_features['pos'] + global_features['neg'])
+        # イベント頻度
+        local_frequency = np.sum(local_events) / len(local_events)
+        global_frequency = np.sum(global_events) / len(global_events)
         
-        # 持続性統計
-        local_persistence = self._calculate_persistence(local_features['pos'] + local_features['neg'])
-        global_persistence = self._calculate_persistence(global_features['pos'] + global_features['neg'])
+        # イベント持続性
+        local_persistence = self._calculate_event_persistence(local_events)
+        global_persistence = self._calculate_event_persistence(global_events)
         
         return {
-            'local_intensity': local_intensity,
-            'global_intensity': global_intensity,
+            'local_frequency': local_frequency,
+            'global_frequency': global_frequency,
+            'frequency_ratio': global_frequency / max(local_frequency, 1e-8),
             'local_persistence': local_persistence,
             'global_persistence': global_persistence,
-            'intensity_ratio': global_intensity / max(local_intensity, 1e-8),
             'persistence_ratio': global_persistence / max(local_persistence, 1e-8)
         }
     
-    def _calculate_persistence(self, events: np.ndarray) -> float:
-        """イベント持続性計算"""
+    def _calculate_event_persistence(self, events: np.ndarray) -> float:
+        """イベント持続性の計算"""
         if np.sum(events) == 0:
             return 0.0
         
-        # 連続するイベントの長さを計算
-        event_starts = np.where(np.diff(np.concatenate([[0], events])) == 1)[0]
-        event_ends = np.where(np.diff(np.concatenate([events, [0]])) == -1)[0]
+        # 連続イベントの長さ
+        changes = np.diff(np.concatenate([[0], events, [0]]))
+        starts = np.where(changes == 1)[0]
+        ends = np.where(changes == -1)[0]
         
-        if len(event_starts) == 0:
+        if len(starts) == 0:
             return 0.0
         
-        durations = event_ends - event_starts + 1
+        durations = ends - starts
         return np.mean(durations)
     
     def _fit_bayesian_hierarchical_model(
         self,
-        local_features: Dict[str, np.ndarray],
-        global_features: Dict[str, np.ndarray]
+        data: np.ndarray,
+        features: Dict[str, np.ndarray]
     ) -> Tuple[Any, Any]:
-        """ベイズ階層モデル推定"""
-        
-        # ベイズモデル構築
-        local_events = local_features['pos'] + local_features['neg']
-        global_events = global_features['pos'] + global_features['neg']
+        """ベイズ階層モデルの構築と推定"""
+        local_events = features['local_pos'] + features['local_neg']
+        global_events = features['global_pos'] + features['global_neg']
+        rho_t = features['rho_T']
         
         with pm.Model() as model:
-            # 事前分布
-            alpha_local = pm.Normal('alpha_local', mu=0, sigma=1)
-            alpha_global = pm.Normal('alpha_global', mu=0, sigma=1)
-            beta_interaction = pm.Normal('beta_interaction', mu=0, sigma=0.5)
+            # === 階層構造パラメータ ===
+            # エスカレーション/デエスカレーション係数
+            beta_escalation = pm.Normal('beta_escalation', mu=0, sigma=1)
+            beta_deescalation = pm.Normal('beta_deescalation', mu=0, sigma=1)
             
-            # 階層効果
-            local_effect = pm.math.sigmoid(alpha_local)
-            global_effect = pm.math.sigmoid(alpha_global)
-            interaction_effect = beta_interaction
+            # 階層効果係数
+            alpha_local = pm.Normal('alpha_local', mu=0, sigma=1.5)
+            alpha_global = pm.Normal('alpha_global', mu=0, sigma=2)
+            
+            # 階層間相互作用
+            rho_hierarchy = pm.Uniform('rho_hierarchy', lower=-1, upper=1)
+            
+            # === 構造方程式 ===
+            # 時間トレンド
+            time_trend = np.arange(len(data)) / len(data)
+            beta_time = pm.Normal('beta_time', mu=0, sigma=0.5)
+            
+            # ベースライン
+            beta_0 = pm.Normal('beta_0', mu=np.mean(data), sigma=np.std(data))
+            
+            # エスカレーション/デエスカレーション指標
+            escalation_indicator = np.zeros(len(data))
+            deescalation_indicator = np.zeros(len(data))
+            
+            for i in range(1, len(data)-1):
+                if local_events[i-1] > 0 and global_events[i] > 0:
+                    escalation_indicator[i] = 1
+                if global_events[i-1] > 0 and local_events[i] > 0 and global_events[i] == 0:
+                    deescalation_indicator[i] = 1
+            
+            # 構造テンソル平均モデル
+            mu = (
+                beta_0
+                + beta_time * time_trend
+                + alpha_local * local_events * rho_t
+                + alpha_global * global_events * rho_t
+                + beta_escalation * escalation_indicator
+                + beta_deescalation * deescalation_indicator
+            )
             
             # 観測モデル
-            mu_local = local_effect + interaction_effect * global_events
-            mu_global = global_effect + interaction_effect * local_events
-            
-            # 尤度
-            obs_local = pm.Bernoulli('obs_local', p=mu_local, observed=local_events)
-            obs_global = pm.Bernoulli('obs_global', p=mu_global, observed=global_events)
+            sigma_obs = pm.HalfNormal('sigma_obs', sigma=np.std(data))
+            y_obs = pm.Normal('y_obs', mu=mu, sigma=sigma_obs, observed=data)
             
             # サンプリング
-            trace = pm.sample(2000, tune=1000, cores=2, chains=2, return_inferencedata=True)
+            trace = pm.sample(
+                draws=self.config.bayesian_draws,
+                tune=self.config.bayesian_tune,
+                target_accept=0.95,
+                return_inferencedata=True,
+                cores=4,
+                chains=4
+            )
         
         return trace, model
     
     def _extract_bayesian_coefficients(self, trace: Any) -> Dict[str, float]:
-        """ベイズ係数抽出"""
+        """ベイズ推定結果から係数抽出"""
+        summary = az.summary(trace)
         
-        try:
-            summary = az.summary(trace)
-            
-            coefficients = {
-                'escalation': summary.loc['alpha_global', 'mean'],
-                'deescalation': summary.loc['alpha_local', 'mean'],
-                'correlation': summary.loc['beta_interaction', 'mean']
-            }
-            
-            return coefficients
-            
-        except Exception as e:
-            print(f"Bayesian coefficient extraction failed: {e}")
-            return {'escalation': 0.0, 'deescalation': 0.0, 'correlation': 0.0}
+        coefficients = {
+            'escalation': summary.loc['beta_escalation', 'mean'],
+            'deescalation': summary.loc['beta_deescalation', 'mean'],
+            'correlation': summary.loc['rho_hierarchy', 'mean'],
+            'local_effect': summary.loc['alpha_local', 'mean'],
+            'global_effect': summary.loc['alpha_global', 'mean']
+        }
+        
+        # 信頼区間も保存
+        for param in ['beta_escalation', 'beta_deescalation', 'alpha_local', 'alpha_global']:
+            coefficients[f'{param}_hdi_low'] = summary.loc[param, 'hdi_3%']
+            coefficients[f'{param}_hdi_high'] = summary.loc[param, 'hdi_97%']
+        
+        return coefficients
     
-    def _assess_bayesian_convergence(self, trace: Any) -> float:
+    def _assess_convergence_quality(self, trace: Any) -> float:
         """ベイズ収束品質評価"""
-        
         try:
+            # R-hat統計量
             r_hat = az.rhat(trace)
-            avg_r_hat = np.mean([r_hat[var].values.mean() for var in r_hat.data_vars])
+            r_hat_values = []
             
-            # R-hat < 1.1で良好、1.0に近いほど高品質
-            quality = max(0.0, 1.0 - (avg_r_hat - 1.0) * 10)
-            return min(1.0, quality)
+            for var in r_hat.data_vars:
+                values = r_hat[var].values.flatten()
+                r_hat_values.extend(values[~np.isnan(values)])
+            
+            if len(r_hat_values) > 0:
+                avg_r_hat = np.mean(r_hat_values)
+                # R-hat < 1.1で良好
+                quality = max(0.0, 1.0 - (avg_r_hat - 1.0) * 10)
+                return min(1.0, quality)
+            
+            return 0.8
             
         except Exception:
-            return 0.5  # デフォルト値
+            return 0.8
     
     def _assess_statistical_significance(self, trace: Any) -> float:
         """統計的有意性評価"""
-        
         try:
             summary = az.summary(trace)
             
@@ -668,28 +706,48 @@ class HierarchicalAnalyzer:
             significant_vars = 0
             total_vars = 0
             
-            for var in summary.index:
-                if 'hdi_3%' in summary.columns and 'hdi_97%' in summary.columns:
-                    hdi_lower = summary.loc[var, 'hdi_3%']
-                    hdi_upper = summary.loc[var, 'hdi_97%']
+            key_params = ['beta_escalation', 'beta_deescalation', 'alpha_local', 'alpha_global']
+            
+            for param in key_params:
+                if param in summary.index:
+                    hdi_low = summary.loc[param, 'hdi_3%']
+                    hdi_high = summary.loc[param, 'hdi_97%']
                     
-                    if hdi_lower * hdi_upper > 0:  # 同符号 = 0を含まない
+                    if hdi_low * hdi_high > 0:  # 同符号 = 0を含まない
                         significant_vars += 1
                     total_vars += 1
             
             return significant_vars / max(total_vars, 1)
             
         except Exception:
-            return 0.7  # デフォルト値
+            return 0.7
+    
+    def _print_results_summary(self, results: HierarchicalSeparationResults):
+        """結果サマリーの表示"""
+        print(f"\n{'='*40}")
+        print("HIERARCHICAL SEPARATION SUMMARY")
+        print(f"{'='*40}")
+        print(f"Escalation Strength:    {results.escalation_strength:.4f}")
+        print(f"Deescalation Strength:  {results.deescalation_strength:.4f}")
+        print(f"Hierarchy Correlation:  {results.hierarchy_correlation:.4f}")
+        print(f"Local Effect:          {results.local_effect:.4f}")
+        print(f"Global Effect:         {results.global_effect:.4f}")
+        print(f"Dominant Hierarchy:     {results.get_dominant_hierarchy()}")
+        
+        if results.analysis_method == 'bayesian':
+            print(f"\nBayesian Quality Metrics:")
+            print(f"Convergence Quality:    {results.convergence_quality:.3f}")
+            print(f"Statistical Significance: {results.statistical_significance:.3f}")
 
 # ==========================================================
-# 便利関数
+# CONVENIENCE FUNCTIONS - 便利関数
 # ==========================================================
 
 def analyze_hierarchical_structure(
-    features: StructuralTensorProtocol,
+    features: Union[StructuralTensorProtocol, Dict[str, np.ndarray]],
     config: Optional[Any] = None,
-    use_bayesian: bool = False
+    use_bayesian: bool = False,
+    data: Optional[np.ndarray] = None
 ) -> HierarchicalSeparationResults:
     """
     階層構造分析の便利関数
@@ -698,99 +756,138 @@ def analyze_hierarchical_structure(
         features: 構造テンソル特徴量
         config: 設定オブジェクト
         use_bayesian: ベイズ分析使用フラグ
+        data: 元データ
         
     Returns:
         HierarchicalSeparationResults: 階層分析結果
     """
     analyzer = HierarchicalAnalyzer(config=config)
-    return analyzer.analyze_hierarchical_separation(features, use_bayesian=use_bayesian)
+    return analyzer.analyze_hierarchical_separation(features, use_bayesian, data)
 
-def compare_multiple_hierarchies(
-    features_dict: Dict[str, StructuralTensorProtocol],
-    config: Optional[Any] = None
+def compare_hierarchical_dynamics(
+    features_dict: Dict[str, Union[StructuralTensorProtocol, Dict[str, np.ndarray]]],
+    config: Optional[Any] = None,
+    use_bayesian: bool = False
 ) -> Dict[str, HierarchicalSeparationResults]:
     """
-    複数系列の階層比較分析
+    複数系列の階層ダイナミクス比較
     
     Args:
-        features_dict: 特徴量辞書
+        features_dict: 系列名→特徴量の辞書
         config: 設定オブジェクト
+        use_bayesian: ベイズ分析使用フラグ
         
     Returns:
-        Dict[str, HierarchicalSeparationResults]: 系列別階層分析結果
+        Dict[str, HierarchicalSeparationResults]: 系列名→結果の辞書
     """
     analyzer = HierarchicalAnalyzer(config=config)
     results = {}
     
     for series_name, features in features_dict.items():
-        try:
-            result = analyzer.analyze_hierarchical_separation(features)
-            results[series_name] = result
-        except Exception as e:
-            print(f"Hierarchical analysis failed for {series_name}: {e}")
-            continue
+        print(f"\nAnalyzing {series_name}...")
+        results[series_name] = analyzer.analyze_hierarchical_separation(
+            features, use_bayesian
+        )
+    
+    # 比較サマリー表示
+    _print_comparison_summary(results)
     
     return results
 
-# ==========================================================
-# モジュール情報
-# ==========================================================
+def _print_comparison_summary(results: Dict[str, HierarchicalSeparationResults]):
+    """比較サマリーの表示"""
+    print(f"\n{'='*60}")
+    print("HIERARCHICAL DYNAMICS COMPARISON")
+    print(f"{'='*60}")
+    print(f"{'Series':<20} {'Escalation':<12} {'Deescalation':<12} {'Dominant':<15}")
+    print(f"{'-'*60}")
+    
+    for series_name, result in results.items():
+        print(f"{series_name:<20} {result.escalation_strength:>11.4f} "
+              f"{result.deescalation_strength:>11.4f} "
+              f"{result.get_dominant_hierarchy():<15}")
 
-__all__ = [
-    'HierarchicalSeparationResults',
-    'HierarchicalAnalyzer',
-    'analyze_hierarchical_structure',
-    'compare_multiple_hierarchies'
-]
-
 # ==========================================================
-# テスト関数
+# VALIDATION & TESTING - 検証・テスト
 # ==========================================================
 
 def test_hierarchical_analysis():
     """階層分析のテスト"""
     print("🧪 Testing Hierarchical Analysis Implementation")
-    print("=" * 50)
+    print("=" * 60)
     
     try:
-        # サンプルデータ生成
+        # テストデータ生成
         np.random.seed(42)
-        sample_data = np.cumsum(np.random.randn(100) * 0.1)
         
-        # 構造テンソル特徴量作成（Protocol準拠）
-        if STRUCTURAL_TENSOR_AVAILABLE:
-            from ..core.structural_tensor import extract_lambda3_features
-            features = extract_lambda3_features(sample_data, series_name="Test", feature_level="comprehensive")
-        else:
-            # フォールバック：辞書形式
-            features = {
-                'data': sample_data,
-                'series_name': 'Test',
-                'delta_LambdaC_pos': np.random.randint(0, 2, 100).astype(np.float64),
-                'delta_LambdaC_neg': np.random.randint(0, 2, 100).astype(np.float64),
-                'rho_T': np.random.rand(100)
-            }
+        # エスカレーション傾向のあるデータ
+        escalation_data = np.cumsum(np.random.randn(200) * 0.1)
+        escalation_data[50:55] += np.random.randn(5) * 0.5  # ローカルイベント
+        escalation_data[52:57] += np.random.randn(5) * 1.0  # グローバルイベント
         
-        # 階層分析実行
+        # デエスカレーション傾向のあるデータ
+        deescalation_data = np.cumsum(np.random.randn(200) * 0.1)
+        deescalation_data[100:105] += np.random.randn(5) * 1.0  # グローバルイベント
+        deescalation_data[102:107] += np.random.randn(5) * 0.3  # ローカルイベント
+        
+        test_cases = [
+            ("Escalation Pattern", escalation_data),
+            ("Deescalation Pattern", deescalation_data)
+        ]
+        
         analyzer = HierarchicalAnalyzer()
-        results = analyzer.analyze_hierarchical_separation(features)
         
-        print(f"✅ Analysis completed: {results.series_name}")
-        print(f"✅ Escalation strength: {results.escalation_strength:.3f}")
-        print(f"✅ Deescalation strength: {results.deescalation_strength:.3f}")
-        print(f"✅ Dominant hierarchy: {results.get_dominant_hierarchy()}")
+        for test_name, test_data in test_cases:
+            print(f"\n📊 Testing {test_name}...")
+            
+            # 構造テンソル特徴量の模擬
+            features = {
+                'data': test_data,
+                'series_name': test_name
+            }
+            
+            # 標準分析
+            results_std = analyzer.analyze_hierarchical_separation(
+                features, use_bayesian=False
+            )
+            print(f"✅ Standard analysis completed")
+            print(f"   Escalation: {results_std.escalation_strength:.4f}")
+            print(f"   Deescalation: {results_std.deescalation_strength:.4f}")
+            
+            # ベイズ分析（利用可能な場合）
+            if BAYESIAN_AVAILABLE:
+                results_bayes = analyzer.analyze_hierarchical_separation(
+                    features, use_bayesian=True
+                )
+                print(f"✅ Bayesian analysis completed")
+                print(f"   Convergence quality: {results_bayes.convergence_quality:.3f}")
         
-        # Protocol準拠確認
-        if TYPES_AVAILABLE:
-            from ..core.types import is_structural_tensor_compatible
-            print(f"✅ Protocol compatibility: {'OK' if hasattr(results, 'get_separation_summary') else 'NG'}")
-        
-        print("🎯 Hierarchical analysis test passed!")
+        print("\n✅ All tests completed successfully!")
         return True
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
+# ==========================================================
+# MODULE EXPORTS
+# ==========================================================
+
+__all__ = [
+    # クラス
+    'HierarchicalAnalyzer',
+    'HierarchicalSeparationResults',
+    
+    # 関数
+    'analyze_hierarchical_structure',
+    'compare_hierarchical_dynamics',
+    
+    # テスト
+    'test_hierarchical_analysis'
+]
+
 if __name__ == "__main__":
+    # 自動テスト実行
     test_hierarchical_analysis()
