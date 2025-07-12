@@ -1,13 +1,16 @@
 # ==========================================================
-# lambda3/analysis/pairwise.py (完全版)
+# lambda3/analysis/pairwise.py (Lambda³理論完全準拠版)
 # Pairwise Interaction Analysis for Lambda³ Theory
 # ==========================================================
 
 """
-Lambda³理論ペアワイズ相互作用解析モジュール（完全版）
+Lambda³理論ペアワイズ相互作用解析モジュール（完全準拠版）
 
 構造テンソル(Λ)系列間の非対称相互作用を定量化し、
 ∆ΛC pulsationsの相互響応パターンを解析。
+
+重要: 全ての相関・同期計算は∆ΛC（構造変化）とρT（張力スカラー）
+のみで実行。元データの直接使用は厳禁。
 
 核心概念:
 - 非対称相互作用: A→B と B→A の方向別影響度
@@ -91,58 +94,9 @@ try:
     )
     JIT_FUNCTIONS_AVAILABLE = True
     
-    # レガシー互換性
-    calculate_sync_profile = calculate_sync_profile_fixed
-    calculate_sync_rate_at_lag = calculate_sync_rate_at_lag_fixed
-    
 except ImportError:
     JIT_FUNCTIONS_AVAILABLE = False
     warnings.warn("JIT functions not available. Using fallback implementations.")
-    
-    # フォールバック実装
-    def calculate_sync_profile_fixed(series_a, series_b, lag_window):
-        lags = np.arange(-lag_window, lag_window + 1)
-        sync_values = np.zeros(len(lags))
-        for i, lag in enumerate(lags):
-            if lag == 0:
-                if len(series_a) > 1 and len(series_b) > 1:
-                    sync_values[i] = np.corrcoef(series_a, series_b)[0, 1]
-            elif lag > 0 and lag < len(series_a):
-                if len(series_a[:-lag]) > 1 and len(series_b[lag:]) > 1:
-                    sync_values[i] = np.corrcoef(series_a[:-lag], series_b[lag:])[0, 1]
-            else:
-                abs_lag = -lag
-                if abs_lag < len(series_b) and len(series_a[abs_lag:]) > 1:
-                    sync_values[i] = np.corrcoef(series_a[abs_lag:], series_b[:-abs_lag])[0, 1]
-        
-        # NaN値を0に置換
-        sync_values = np.nan_to_num(sync_values, nan=0.0)
-        max_idx = np.argmax(np.abs(sync_values))
-        return lags, sync_values, sync_values[max_idx], lags[max_idx]
-    
-    def normalize_array_fixed(arr, method='zscore'):
-        if method == 'zscore':
-            return (arr - np.mean(arr)) / (np.std(arr) + 1e-8)
-        return arr
-    
-    def safe_divide_fixed(num, den, default=0.0):
-        return num / den if abs(den) > 1e-8 else default
-    
-    def detect_phase_coupling_fixed(series_a, series_b):
-        if len(series_a) > 10 and len(series_b) > 10:
-            phase_a = np.diff(series_a)
-            phase_b = np.diff(series_b)
-            min_len = min(len(phase_a), len(phase_b))
-            phase_a = phase_a[:min_len]
-            phase_b = phase_b[:min_len]
-            if min_len > 1:
-                coupling = abs(np.corrcoef(phase_a, phase_b)[0, 1])
-                if np.isnan(coupling):
-                    coupling = 0.0
-                cross_corr = np.correlate(phase_a, phase_b, mode='full')
-                lag = np.argmax(cross_corr) - len(phase_a) + 1
-                return coupling, lag
-        return 0.0, 0.0
 
 # ==========================================================
 # ペアワイズ分析結果データクラス（Protocol準拠）
@@ -151,10 +105,10 @@ except ImportError:
 @dataclass
 class PairwiseInteractionResults:
     """
-    ペアワイズ相互作用分析結果（完全版）
+    ペアワイズ相互作用分析結果（Lambda³理論準拠版）
     
-    PairwiseResultProtocolに準拠し、循環インポートを回避した
-    ペアワイズ分析結果の具体実装。
+    全ての指標は構造テンソル成分（∆ΛC, ρT）から算出。
+    元データの直接相関は含まない。
     """
     
     # 系列識別子
@@ -162,21 +116,29 @@ class PairwiseInteractionResults:
     name_b: str = "Series_B"
     analysis_timestamp: str = field(default_factory=lambda: time.strftime("%Y%m%d_%H%M%S"))
     
-    # 同期性指標
-    synchronization_strength: float = 0.0      # 同期強度
-    structure_synchronization: float = 0.0     # 構造変化同期
+    # 構造同期指標（∆ΛCベース）
+    structure_synchronization: float = 0.0     # ∆ΛC同期強度
+    tension_synchronization: float = 0.0       # ρT同期強度
     
-    # 因果性指標
-    causality_a_to_b: float = 0.0             # A→B因果強度
-    causality_b_to_a: float = 0.0             # B→A因果強度
+    # 構造因果性指標（∆ΛCベース）
+    structure_causality_a_to_b: float = 0.0    # ∆ΛC: A→B因果
+    structure_causality_b_to_a: float = 0.0    # ∆ΛC: B→A因果
+    
+    # 張力因果性指標（ρTベース）
+    tension_causality_a_to_b: float = 0.0      # ρT: A→B因果
+    tension_causality_b_to_a: float = 0.0      # ρT: B→A因果
+    
+    # 統合指標
     asymmetry_index: float = 0.0              # 非対称性指標
+    interaction_strength: float = 0.0          # 相互作用強度
     
     # データ品質
     data_overlap_length: int = 0               # データ重複長
-    correlation_quality: float = 0.0          # 相関品質
+    structure_quality: float = 0.0             # 構造品質
     
     # 詳細分析結果
-    synchronization_profile: Dict[str, float] = field(default_factory=dict)
+    structure_sync_profile: Dict[str, float] = field(default_factory=dict)
+    tension_sync_profile: Dict[str, float] = field(default_factory=dict)
     interaction_coefficients: Dict[str, Dict[str, float]] = field(default_factory=dict)
     phase_coupling: Dict[str, float] = field(default_factory=dict)
     
@@ -188,73 +150,66 @@ class PairwiseInteractionResults:
     # 拡張メトリクス
     asymmetry_metrics: Dict[str, float] = field(default_factory=dict)
     causality_patterns: Dict[str, Dict[int, float]] = field(default_factory=dict)
-    prediction_metrics: Dict[str, float] = field(default_factory=dict)
+    hierarchical_interaction: Dict[str, float] = field(default_factory=dict)
     interaction_quality: Dict[str, float] = field(default_factory=dict)
+    
+    @property
+    def synchronization_strength(self) -> float:
+        """統合同期強度（後方互換性）"""
+        return (self.structure_synchronization + self.tension_synchronization) / 2
+    
+    @property
+    def causality_a_to_b(self) -> float:
+        """統合因果強度 A→B（後方互換性）"""
+        return (self.structure_causality_a_to_b + self.tension_causality_a_to_b) / 2
+    
+    @property
+    def causality_b_to_a(self) -> float:
+        """統合因果強度 B→A（後方互換性）"""
+        return (self.structure_causality_b_to_a + self.tension_causality_b_to_a) / 2
+    
+    @property
+    def correlation_quality(self) -> float:
+        """相関品質（後方互換性）"""
+        return self.structure_quality
     
     def get_interaction_summary(self) -> Dict[str, float]:
         """相互作用サマリー取得"""
         return {
-            'synchronization': self.synchronization_strength,
+            'structure_sync': self.structure_synchronization,
+            'tension_sync': self.tension_synchronization,
             'asymmetry': self.asymmetry_index,
             'causality_a_to_b': self.causality_a_to_b,
             'causality_b_to_a': self.causality_b_to_a,
-            'quality': self.correlation_quality
+            'quality': self.structure_quality
         }
     
     def get_dominant_direction(self) -> str:
         """優勢方向判定"""
-        if self.causality_a_to_b > self.causality_b_to_a * 1.2:
+        total_a_to_b = self.causality_a_to_b
+        total_b_to_a = self.causality_b_to_a
+        
+        if total_a_to_b > total_b_to_a * 1.2:
             return 'a_to_b'
-        elif self.causality_b_to_a > self.causality_a_to_b * 1.2:
+        elif total_b_to_a > total_a_to_b * 1.2:
             return 'b_to_a'
         else:
             return 'symmetric'
     
-    def get_sync_strength(self) -> float:
-        """同期強度取得（互換性）"""
-        return self.synchronization_strength
-    
-    def get_asymmetry_strength(self) -> float:
-        """非対称性強度取得（互換性）"""
-        return self.asymmetry_index
-    
     def calculate_bidirectional_coupling(self) -> float:
         """双方向結合強度計算"""
         return (self.causality_a_to_b + self.causality_b_to_a) / 2
-    
-    def get_asymmetry_score(self) -> float:
-        """非対称性総合スコア取得"""
-        return self.asymmetry_metrics.get('total_asymmetry', self.asymmetry_index)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """辞書形式変換"""
-        return {
-            'name_a': self.name_a,
-            'name_b': self.name_b,
-            'analysis_timestamp': self.analysis_timestamp,
-            'synchronization_strength': self.synchronization_strength,
-            'structure_synchronization': self.structure_synchronization,
-            'causality_a_to_b': self.causality_a_to_b,
-            'causality_b_to_a': self.causality_b_to_a,
-            'asymmetry_index': self.asymmetry_index,
-            'data_overlap_length': self.data_overlap_length,
-            'correlation_quality': self.correlation_quality,
-            'dominant_direction': self.get_dominant_direction(),
-            'analysis_method': self.analysis_method,
-            'processing_time': self.processing_time,
-            'bidirectional_coupling': self.calculate_bidirectional_coupling()
-        }
 
 # ==========================================================
-# ペアワイズ分析器クラス（完全版）
+# ペアワイズ分析器クラス（Lambda³理論準拠版）
 # ==========================================================
 
 class PairwiseAnalyzer:
     """
-    Lambda³ペアワイズ相互作用分析器（完全版）
+    Lambda³ペアワイズ相互作用分析器（完全準拠版）
     
-    Protocol準拠による型安全性を確保し、循環インポートを回避した
-    ペアワイズ相互作用分析のメインエンジン。
+    全ての分析は構造テンソル成分（∆ΛC, ρT）のみで実行。
+    元データの直接使用は行わない。
     """
     
     def __init__(self, config: Optional[Any] = None, use_jit: Optional[bool] = None):
@@ -293,7 +248,7 @@ class PairwiseAnalyzer:
         use_bayesian: bool = False
     ) -> PairwiseInteractionResults:
         """
-        非対称相互作用分析実行
+        非対称相互作用分析実行（Lambda³理論準拠）
         
         Args:
             features_a: 系列Aの構造テンソル特徴量
@@ -308,19 +263,22 @@ class PairwiseAnalyzer:
         # 入力検証
         self._validate_inputs(features_a, features_b)
         
-        # データ取得
-        data_a, name_a = self._extract_data_from_features(features_a)
-        data_b, name_b = self._extract_data_from_features(features_b)
+        # 構造テンソル成分の取得
+        components_a = self._extract_tensor_components(features_a)
+        components_b = self._extract_tensor_components(features_b)
+        
+        name_a = components_a['name']
+        name_b = components_b['name']
         
         print(f"Analyzing pairwise interaction: {name_a} ↔ {name_b}")
         
         try:
             if use_bayesian and BAYESIAN_AVAILABLE:
                 # ベイズペアワイズ分析
-                results = self._analyze_with_bayesian(features_a, features_b, data_a, data_b, name_a, name_b)
+                results = self._analyze_with_bayesian(components_a, components_b)
             else:
                 # 標準ペアワイズ分析
-                results = self._analyze_standard(features_a, features_b, data_a, data_b, name_a, name_b)
+                results = self._analyze_standard(components_a, components_b)
             
             # 処理時間記録
             results.processing_time = time.time() - start_time
@@ -331,296 +289,332 @@ class PairwiseAnalyzer:
             raise Lambda3Error(f"Pairwise analysis failed for {name_a}-{name_b}: {e}")
     
     def _validate_inputs(self, features_a: StructuralTensorProtocol, features_b: StructuralTensorProtocol):
-        """入力検証"""
-        if TYPES_AVAILABLE:
-            if not is_structural_tensor_compatible(features_a):
-                raise Lambda3Error("features_a is not compatible with StructuralTensorProtocol")
-            if not is_structural_tensor_compatible(features_b):
-                raise Lambda3Error("features_b is not compatible with StructuralTensorProtocol")
+        """入力検証（Lambda³理論準拠）"""
+        # ∆ΛC成分の存在確認
+        if not self._has_structure_components(features_a):
+            raise Lambda3Error("features_a lacks required ∆ΛC components")
+        if not self._has_structure_components(features_b):
+            raise Lambda3Error("features_b lacks required ∆ΛC components")
         
-        # データの存在確認
-        data_a = self._get_data_length(features_a)
-        data_b = self._get_data_length(features_b)
+        # データ長の確認
+        length_a = self._get_component_length(features_a)
+        length_b = self._get_component_length(features_b)
         
-        if data_a < 10 or data_b < 10:
+        if length_a < 10 or length_b < 10:
             raise Lambda3Error("Insufficient data for pairwise analysis")
     
-    def _get_data_length(self, features: StructuralTensorProtocol) -> int:
-        """データ長取得"""
-        if hasattr(features, 'data'):
-            return len(features.data)
-        elif hasattr(features, '__getitem__') and 'data' in features:
-            return len(features['data'])
-        elif hasattr(features, '__len__'):
-            return len(features)
-        else:
-            return 0
+    def _has_structure_components(self, features: StructuralTensorProtocol) -> bool:
+        """構造テンソル成分の存在確認"""
+        if hasattr(features, 'delta_LambdaC_pos') and hasattr(features, 'rho_T'):
+            return True
+        elif isinstance(features, dict) and 'delta_LambdaC_pos' in features and 'rho_T' in features:
+            return True
+        return False
     
-    def _extract_data_from_features(self, features: StructuralTensorProtocol) -> Tuple[np.ndarray, str]:
-        """特徴量からデータ抽出"""
+    def _get_component_length(self, features: StructuralTensorProtocol) -> int:
+        """構造テンソル成分の長さ取得"""
+        if hasattr(features, 'delta_LambdaC_pos') and features.delta_LambdaC_pos is not None:
+            return len(features.delta_LambdaC_pos)
+        elif isinstance(features, dict) and 'delta_LambdaC_pos' in features:
+            return len(features['delta_LambdaC_pos'])
+        return 0
+    
+    def _extract_tensor_components(self, features: StructuralTensorProtocol) -> Dict[str, Any]:
+        """構造テンソル成分の抽出（Lambda³理論準拠）"""
         
-        # データの取得
-        if hasattr(features, 'data'):
-            data = features.data
-            series_name = getattr(features, 'series_name', 'Series')
-        elif hasattr(features, '__getitem__') and 'data' in features:
-            data = features['data']
-            series_name = features.get('series_name', 'Series')
+        components = {}
+        
+        # 名前の取得
+        if hasattr(features, 'series_name'):
+            components['name'] = features.series_name
+        elif isinstance(features, dict) and 'series_name' in features:
+            components['name'] = features['series_name']
         else:
-            # フォールバック：features自体をデータとして扱う
-            data = np.asarray(features)
-            series_name = 'Series'
+            components['name'] = 'Series'
         
-        # 型安全性確保
-        if TYPES_AVAILABLE:
-            data = ensure_float_array(data)
-        else:
-            data = np.asarray(data, dtype=np.float64)
+        # ∆ΛC成分の取得
+        if hasattr(features, 'delta_LambdaC_pos'):
+            components['delta_pos'] = features.delta_LambdaC_pos
+            components['delta_neg'] = features.delta_LambdaC_neg
+        elif isinstance(features, dict):
+            components['delta_pos'] = features.get('delta_LambdaC_pos', np.array([]))
+            components['delta_neg'] = features.get('delta_LambdaC_neg', np.array([]))
         
-        return data, series_name
+        # ρT成分の取得
+        if hasattr(features, 'rho_T'):
+            components['rho_T'] = features.rho_T
+        elif isinstance(features, dict):
+            components['rho_T'] = features.get('rho_T', np.array([]))
+        
+        # 階層的特徴の取得（オプション）
+        if hasattr(features, 'local_pos'):
+            components['local_pos'] = features.local_pos
+            components['local_neg'] = features.local_neg
+            components['global_pos'] = features.global_pos
+            components['global_neg'] = features.global_neg
+        elif isinstance(features, dict):
+            components['local_pos'] = features.get('local_pos', None)
+            components['local_neg'] = features.get('local_neg', None)
+            components['global_pos'] = features.get('global_pos', None)
+            components['global_neg'] = features.get('global_neg', None)
+        
+        # 型変換と検証
+        for key in ['delta_pos', 'delta_neg', 'rho_T']:
+            if key in components and components[key] is not None:
+                components[key] = np.asarray(components[key], dtype=np.float64)
+        
+        return components
     
     def _analyze_standard(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol,
-        data_a: np.ndarray,
-        data_b: np.ndarray,
-        name_a: str,
-        name_b: str
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any]
     ) -> PairwiseInteractionResults:
-        """標準ペアワイズ分析"""
+        """標準ペアワイズ分析（Lambda³理論準拠）"""
+        
+        name_a = components_a['name']
+        name_b = components_b['name']
         
         print(f"Running standard pairwise analysis: {name_a} ↔ {name_b}")
         
         # データ長の統一
-        min_length = min(len(data_a), len(data_b))
-        data_a_aligned = data_a[:min_length]
-        data_b_aligned = data_b[:min_length]
+        min_length = min(
+            len(components_a['delta_pos']),
+            len(components_b['delta_pos'])
+        )
         
-        # 同期性分析
-        sync_results = self._calculate_synchronization(data_a_aligned, data_b_aligned, features_a, features_b)
+        # 構造同期分析（∆ΛCベース）
+        structure_sync_results = self._calculate_structure_synchronization(
+            components_a, components_b, min_length
+        )
         
-        # 因果性分析
-        causality_results = self._calculate_causality(data_a_aligned, data_b_aligned, features_a, features_b)
+        # 張力同期分析（ρTベース）
+        tension_sync_results = self._calculate_tension_synchronization(
+            components_a, components_b, min_length
+        )
+        
+        # 構造因果性分析（∆ΛCベース）
+        structure_causality = self._calculate_structure_causality(
+            components_a, components_b, min_length
+        )
+        
+        # 張力因果性分析（ρTベース）
+        tension_causality = self._calculate_tension_causality(
+            components_a, components_b, min_length
+        )
         
         # 相互作用係数計算
-        interaction_coeffs = self._calculate_interaction_coefficients(features_a, features_b)
+        interaction_coeffs = self._calculate_interaction_coefficients(
+            components_a, components_b, min_length
+        )
         
-        # 位相結合分析
-        phase_coupling = self._calculate_phase_coupling(data_a_aligned, data_b_aligned)
+        # 位相結合分析（構造テンソルベース）
+        phase_coupling = self._calculate_phase_coupling(
+            components_a, components_b, min_length
+        )
         
         # 品質評価
-        correlation_quality = self._assess_correlation_quality(data_a_aligned, data_b_aligned)
+        structure_quality = self._assess_structure_quality(
+            components_a, components_b, min_length
+        )
         
         # 拡張メトリクス計算
-        asymmetry_metrics = self._calculate_asymmetry_metrics(causality_results)
-        causality_patterns = self._calculate_causality_patterns(data_a_aligned, data_b_aligned)
-        prediction_metrics = self._calculate_prediction_metrics(data_a_aligned, data_b_aligned)
-        interaction_quality = self._calculate_interaction_quality(sync_results, causality_results, correlation_quality)
+        asymmetry_metrics = self._calculate_asymmetry_metrics(
+            structure_causality, tension_causality
+        )
+        
+        causality_patterns = self._calculate_causality_patterns(
+            components_a, components_b, min_length
+        )
+        
+        hierarchical_interaction = self._calculate_hierarchical_interaction(
+            components_a, components_b, min_length
+        )
+        
+        interaction_quality = self._calculate_interaction_quality(
+            structure_sync_results, tension_sync_results,
+            structure_causality, tension_causality,
+            structure_quality
+        )
+        
+        # 統合指標の計算
+        asymmetry_index = self._calculate_asymmetry_index(
+            structure_causality, tension_causality
+        )
+        
+        interaction_strength = self._calculate_interaction_strength(
+            structure_sync_results, tension_sync_results,
+            structure_causality, tension_causality
+        )
         
         # 結果構築
         results = PairwiseInteractionResults(
             name_a=name_a,
             name_b=name_b,
-            synchronization_strength=sync_results['sync_strength'],
-            structure_synchronization=sync_results['structure_sync'],
-            causality_a_to_b=causality_results['a_to_b'],
-            causality_b_to_a=causality_results['b_to_a'],
-            asymmetry_index=abs(causality_results['a_to_b'] - causality_results['b_to_a']),
+            structure_synchronization=structure_sync_results['sync_strength'],
+            tension_synchronization=tension_sync_results['sync_strength'],
+            structure_causality_a_to_b=structure_causality['a_to_b'],
+            structure_causality_b_to_a=structure_causality['b_to_a'],
+            tension_causality_a_to_b=tension_causality['a_to_b'],
+            tension_causality_b_to_a=tension_causality['b_to_a'],
+            asymmetry_index=asymmetry_index,
+            interaction_strength=interaction_strength,
             data_overlap_length=min_length,
-            correlation_quality=correlation_quality,
-            synchronization_profile=sync_results['profile'],
+            structure_quality=structure_quality,
+            structure_sync_profile=structure_sync_results['profile'],
+            tension_sync_profile=tension_sync_results['profile'],
             interaction_coefficients=interaction_coeffs,
             phase_coupling=phase_coupling,
             analysis_method='standard',
             asymmetry_metrics=asymmetry_metrics,
             causality_patterns=causality_patterns,
-            prediction_metrics=prediction_metrics,
+            hierarchical_interaction=hierarchical_interaction,
             interaction_quality=interaction_quality
         )
         
         return results
     
-    def _analyze_with_bayesian(
+    def _calculate_structure_synchronization(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol,
-        data_a: np.ndarray,
-        data_b: np.ndarray,
-        name_a: str,
-        name_b: str
-    ) -> PairwiseInteractionResults:
-        """ベイズペアワイズ分析"""
-        
-        print(f"Running Bayesian pairwise analysis: {name_a} ↔ {name_b}")
-        
-        # データ長の統一
-        min_length = min(len(data_a), len(data_b))
-        data_a_aligned = data_a[:min_length]
-        data_b_aligned = data_b[:min_length]
-        
-        # ベイズモデル構築と推定
-        trace, model = self._fit_bayesian_pairwise_model(data_a_aligned, data_b_aligned, features_a, features_b)
-        
-        # ベイズ結果から係数抽出
-        bayesian_coeffs = self._extract_bayesian_pairwise_coefficients(trace)
-        
-        # 標準分析も実行（比較用）
-        sync_results = self._calculate_synchronization(data_a_aligned, data_b_aligned, features_a, features_b)
-        phase_coupling = self._calculate_phase_coupling(data_a_aligned, data_b_aligned)
-        correlation_quality = self._assess_correlation_quality(data_a_aligned, data_b_aligned)
-        
-        # 拡張メトリクス計算
-        asymmetry_metrics = self._calculate_asymmetry_metrics(bayesian_coeffs)
-        causality_patterns = self._calculate_causality_patterns(data_a_aligned, data_b_aligned)
-        prediction_metrics = self._calculate_prediction_metrics(data_a_aligned, data_b_aligned)
-        interaction_quality = self._calculate_interaction_quality(sync_results, bayesian_coeffs, correlation_quality)
-        
-        # 結果構築
-        results = PairwiseInteractionResults(
-            name_a=name_a,
-            name_b=name_b,
-            synchronization_strength=sync_results['sync_strength'],
-            structure_synchronization=sync_results['structure_sync'],
-            causality_a_to_b=bayesian_coeffs.get('causality_a_to_b', 0.0),
-            causality_b_to_a=bayesian_coeffs.get('causality_b_to_a', 0.0),
-            asymmetry_index=bayesian_coeffs.get('asymmetry', 0.0),
-            data_overlap_length=min_length,
-            correlation_quality=correlation_quality,
-            synchronization_profile=sync_results['profile'],
-            interaction_coefficients={'bayesian': bayesian_coeffs},
-            phase_coupling=phase_coupling,
-            analysis_method='bayesian',
-            bayesian_trace=trace,
-            asymmetry_metrics=asymmetry_metrics,
-            causality_patterns=causality_patterns,
-            prediction_metrics=prediction_metrics,
-            interaction_quality=interaction_quality
-        )
-        
-        return results
-    
-    def _calculate_synchronization(
-        self,
-        data_a: np.ndarray,
-        data_b: np.ndarray,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
     ) -> Dict[str, Any]:
-        """同期性計算（修正版）"""
+        """構造同期計算（∆ΛCベース）"""
         
-        # 基本同期強度（差分ベースに変更）
-        if len(data_a) > 1 and len(data_b) > 1:
-            # 構造テンソル差分での相関計算（トレンド除去）
-            diff_a = np.diff(data_a)
-            diff_b = np.diff(data_b)
+        # 構造変化イベントの統合
+        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
+        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
+        
+        # 基本同期強度
+        if np.sum(events_a) > 0 and np.sum(events_b) > 0:
+            # 構造変化の同時発生率
+            sync_strength = np.mean(events_a * events_b)
             
-            if len(diff_a) > 0 and len(diff_b) > 0:
-                correlation = np.corrcoef(diff_a, diff_b)[0, 1]
-                sync_strength = abs(correlation) if not np.isnan(correlation) else 0.0
-            else:
+            # 条件付き同期率
+            conditional_sync_ab = np.sum(events_a * events_b) / (np.sum(events_a) + 1e-8)
+            conditional_sync_ba = np.sum(events_a * events_b) / (np.sum(events_b) + 1e-8)
+        else:
+            sync_strength = 0.0
+            conditional_sync_ab = 0.0
+            conditional_sync_ba = 0.0
+        
+        # 同期プロファイル計算
+        sync_profile = self._calculate_sync_profile(events_a, events_b)
+        
+        return {
+            'sync_strength': sync_strength,
+            'conditional_ab': conditional_sync_ab,
+            'conditional_ba': conditional_sync_ba,
+            'profile': sync_profile
+        }
+    
+    def _calculate_tension_synchronization(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, Any]:
+        """張力同期計算（ρTベース）"""
+        
+        rho_a = components_a['rho_T'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
+        
+        # 張力相関（正規化後）
+        if len(rho_a) > 1 and len(rho_b) > 1:
+            # 正規化
+            rho_a_norm = (rho_a - np.mean(rho_a)) / (np.std(rho_a) + 1e-8)
+            rho_b_norm = (rho_b - np.mean(rho_b)) / (np.std(rho_b) + 1e-8)
+            
+            # 相関計算
+            sync_strength = abs(np.corrcoef(rho_a_norm, rho_b_norm)[0, 1])
+            if np.isnan(sync_strength):
                 sync_strength = 0.0
         else:
             sync_strength = 0.0
         
-        # 構造変化同期（これは既に正しい）
-        structure_sync = self._calculate_structure_synchronization(features_a, features_b)
-        
-        # 同期プロファイル（これも差分ベースに）
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            sync_profile = self._calculate_sync_profile_jit(diff_a, diff_b)
-        else:
-            sync_profile = self._calculate_sync_profile_python(diff_a, diff_b)
+        # 同期プロファイル計算
+        sync_profile = self._calculate_sync_profile(rho_a, rho_b)
         
         return {
             'sync_strength': sync_strength,
-            'structure_sync': structure_sync,
             'profile': sync_profile
         }
     
-    def _calculate_structure_synchronization(
+    def _calculate_structure_causality(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
-    ) -> float:
-        """構造変化同期計算"""
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, float]:
+        """構造因果性計算（∆ΛCベース）"""
         
-        # 構造変化イベントの取得
-        events_a = self._get_structure_events(features_a)
-        events_b = self._get_structure_events(features_b)
+        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
+        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
         
-        # 長さの統一
-        min_length = min(len(events_a), len(events_b))
-        if min_length > 1:
-            events_a = events_a[:min_length]
-            events_b = events_b[:min_length]
-            
-            # 構造変化同期率
-            if np.sum(events_a) > 0 and np.sum(events_b) > 0:
-                sync_rate = np.mean(events_a * events_b)
-            else:
-                sync_rate = 0.0
-        else:
-            sync_rate = 0.0
+        causality_a_to_b = 0.0
+        causality_b_to_a = 0.0
         
-        return sync_rate
-    
-    def _get_structure_events(self, features: StructuralTensorProtocol) -> np.ndarray:
-        """構造変化イベント取得"""
-        
-        if hasattr(features, 'delta_LambdaC_pos') and hasattr(features, 'delta_LambdaC_neg'):
-            pos_events = features.delta_LambdaC_pos if features.delta_LambdaC_pos is not None else np.array([])
-            neg_events = features.delta_LambdaC_neg if features.delta_LambdaC_neg is not None else np.array([])
-            
-            if len(pos_events) > 0 and len(neg_events) > 0:
-                return pos_events + neg_events
-            elif len(pos_events) > 0:
-                return pos_events
-            elif len(neg_events) > 0:
-                return neg_events
-            else:
-                return np.array([])
+        # 遅延因果性の計算
+        for lag in range(1, min(10, min_length // 5)):
+            if lag < min_length:
+                # A(t-lag) → B(t)
+                if np.sum(events_a[:-lag]) > 0:
+                    joint_ab = np.sum(events_a[:-lag] * events_b[lag:])
+                    marginal_a = np.sum(events_a[:-lag])
+                    causality_a_to_b = max(causality_a_to_b, joint_ab / marginal_a)
                 
-        elif isinstance(features, dict):
-            pos_events = features.get('delta_LambdaC_pos', np.array([]))
-            neg_events = features.get('delta_LambdaC_neg', np.array([]))
-            
-            if len(pos_events) > 0 and len(neg_events) > 0:
-                return pos_events + neg_events
-            elif len(pos_events) > 0:
-                return pos_events
-            else:
-                return np.array([])
+                # B(t-lag) → A(t)
+                if np.sum(events_b[:-lag]) > 0:
+                    joint_ba = np.sum(events_b[:-lag] * events_a[lag:])
+                    marginal_b = np.sum(events_b[:-lag])
+                    causality_b_to_a = max(causality_b_to_a, joint_ba / marginal_b)
         
-        return np.array([])
+        return {
+            'a_to_b': causality_a_to_b,
+            'b_to_a': causality_b_to_a
+        }
     
-    def _calculate_sync_profile_jit(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """JIT同期プロファイル計算"""
+    def _calculate_tension_causality(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, float]:
+        """張力因果性計算（ρTベース）"""
         
-        try:
-            lag_window = getattr(self.config, 'lag_window', 10)
-            
-            # JIT関数で同期プロファイル計算
-            lags, sync_values, max_sync, optimal_lag = calculate_sync_profile_fixed(
-                data_a, data_b, lag_window
-            )
-            
-            return {
-                'max_sync': float(max_sync),
-                'optimal_lag': int(optimal_lag),
-                'profile': {int(lag): float(sync) for lag, sync in zip(lags, sync_values)}
-            }
-            
-        except Exception as e:
-            print(f"JIT sync profile calculation failed: {e}, falling back to Python")
-            return self._calculate_sync_profile_python(data_a, data_b)
+        rho_a = components_a['rho_T'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
+        
+        causality_a_to_b = 0.0
+        causality_b_to_a = 0.0
+        
+        # 遅延相関による因果性
+        for lag in range(1, min(10, min_length // 5)):
+            if lag < min_length:
+                # A(t-lag) → B(t)
+                if len(rho_a[:-lag]) > 1 and len(rho_b[lag:]) > 1:
+                    corr_ab = np.corrcoef(rho_a[:-lag], rho_b[lag:])[0, 1]
+                    if not np.isnan(corr_ab):
+                        causality_a_to_b = max(causality_a_to_b, abs(corr_ab))
+                
+                # B(t-lag) → A(t)
+                if len(rho_b[:-lag]) > 1 and len(rho_a[lag:]) > 1:
+                    corr_ba = np.corrcoef(rho_b[:-lag], rho_a[lag:])[0, 1]
+                    if not np.isnan(corr_ba):
+                        causality_b_to_a = max(causality_b_to_a, abs(corr_ba))
+        
+        return {
+            'a_to_b': causality_a_to_b,
+            'b_to_a': causality_b_to_a
+        }
     
-    def _calculate_sync_profile_python(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """Python同期プロファイル計算（修正版）"""
-        
-        # 差分計算でトレンド除去
-        diff_a = np.diff(data_a) if len(data_a) > 1 else data_a
-        diff_b = np.diff(data_b) if len(data_b) > 1 else data_b
+    def _calculate_sync_profile(
+        self,
+        series_a: np.ndarray,
+        series_b: np.ndarray
+    ) -> Dict[str, float]:
+        """同期プロファイル計算（汎用）"""
         
         lag_window = getattr(self.config, 'lag_window', 10)
         sync_profile = {}
@@ -629,25 +623,44 @@ class PairwiseAnalyzer:
         
         for lag in range(-lag_window, lag_window + 1):
             if lag < 0:
-                if -lag < len(diff_a):
-                    sync = np.corrcoef(diff_a[-lag:], diff_b[:lag])[0, 1] if len(diff_a[-lag:]) > 1 else 0.0
+                # B leads A
+                if -lag < len(series_a):
+                    a_lagged = series_a[-lag:]
+                    b_current = series_b[:lag]
+                    if len(a_lagged) > 1 and len(b_current) > 1:
+                        sync = abs(np.corrcoef(a_lagged, b_current)[0, 1])
+                        if np.isnan(sync):
+                            sync = 0.0
+                    else:
+                        sync = 0.0
                 else:
                     sync = 0.0
             elif lag > 0:
-                if lag < len(diff_b):
-                    sync = np.corrcoef(diff_a[:-lag], diff_b[lag:])[0, 1] if len(diff_a[:-lag]) > 1 else 0.0
+                # A leads B
+                if lag < len(series_b):
+                    a_current = series_a[:-lag]
+                    b_lagged = series_b[lag:]
+                    if len(a_current) > 1 and len(b_lagged) > 1:
+                        sync = abs(np.corrcoef(a_current, b_lagged)[0, 1])
+                        if np.isnan(sync):
+                            sync = 0.0
+                    else:
+                        sync = 0.0
                 else:
                     sync = 0.0
             else:
-                sync = np.corrcoef(diff_a, diff_b)[0, 1] if len(diff_a) > 1 else 0.0
+                # No lag
+                if len(series_a) > 1 and len(series_b) > 1:
+                    sync = abs(np.corrcoef(series_a, series_b)[0, 1])
+                    if np.isnan(sync):
+                        sync = 0.0
+                else:
+                    sync = 0.0
             
-            if np.isnan(sync):
-                sync = 0.0
+            sync_profile[lag] = sync
             
-            sync_profile[lag] = abs(sync)
-            
-            if abs(sync) > max_sync:
-                max_sync = abs(sync)
+            if sync > max_sync:
+                max_sync = sync
                 optimal_lag = lag
         
         return {
@@ -656,465 +669,525 @@ class PairwiseAnalyzer:
             'profile': sync_profile
         }
     
-    def _calculate_causality(
-        self,
-        data_a: np.ndarray,
-        data_b: np.ndarray,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
-    ) -> Dict[str, float]:
-        """因果性計算"""
-        
-        # 基本遅延相関による因果性
-        causality_a_to_b = self._calculate_lagged_correlation(data_a, data_b, direction='forward')
-        causality_b_to_a = self._calculate_lagged_correlation(data_b, data_a, direction='forward')
-        
-        # 構造変化因果性
-        structure_causality = self._calculate_structure_causality(features_a, features_b)
-        
-        # 統合因果性
-        integrated_a_to_b = (causality_a_to_b + structure_causality['a_to_b']) / 2
-        integrated_b_to_a = (causality_b_to_a + structure_causality['b_to_a']) / 2
-        
-        return {
-            'a_to_b': integrated_a_to_b,
-            'b_to_a': integrated_b_to_a
-        }
-    
-    def _calculate_lagged_correlation(
-        self, 
-        data_a: np.ndarray, 
-        data_b: np.ndarray, 
-        direction: str = 'forward',
-        max_lag: int = 5
-    ) -> float:
-        """遅延相関計算（修正版）"""
-        
-        # 差分でトレンド除去
-        diff_a = np.diff(data_a) if len(data_a) > 1 else data_a
-        diff_b = np.diff(data_b) if len(data_b) > 1 else data_b
-        
-        if len(diff_a) < 2 or len(diff_b) < 2:
-            return 0.0
-        
-        max_corr = 0.0
-        
-        for lag in range(1, min(max_lag + 1, len(diff_a) // 2)):
-            if direction == 'forward':
-                # A → B 方向
-                if lag < len(diff_b):
-                    corr = np.corrcoef(diff_a[:-lag], diff_b[lag:])[0, 1]
-            else:
-                # B → A 方向
-                if lag < len(diff_a):
-                    corr = np.corrcoef(diff_b[:-lag], diff_a[lag:])[0, 1]
-            
-            if not np.isnan(corr):
-                max_corr = max(max_corr, abs(corr))
-        
-        return max_corr
-    
-    def _calculate_structure_causality(
-        self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
-    ) -> Dict[str, float]:
-        """構造変化因果性計算"""
-        
-        events_a = self._get_structure_events(features_a)
-        events_b = self._get_structure_events(features_b)
-        
-        # 長さの統一
-        min_length = min(len(events_a), len(events_b))
-        if min_length > 10:
-            events_a = events_a[:min_length]
-            events_b = events_b[:min_length]
-            
-            # A→B構造因果性
-            causality_a_to_b = 0.0
-            causality_b_to_a = 0.0
-            
-            for lag in range(1, min(5, min_length // 5)):
-                if lag < min_length:
-                    # A(t-lag) → B(t)
-                    joint_ab = np.mean(events_a[:-lag] * events_b[lag:])
-                    marginal_a = np.mean(events_a[:-lag])
-                    if marginal_a > 0:
-                        causality_a_to_b = max(causality_a_to_b, joint_ab / marginal_a)
-                    
-                    # B(t-lag) → A(t)
-                    joint_ba = np.mean(events_b[:-lag] * events_a[lag:])
-                    marginal_b = np.mean(events_b[:-lag])
-                    if marginal_b > 0:
-                        causality_b_to_a = max(causality_b_to_a, joint_ba / marginal_b)
-        else:
-            causality_a_to_b = 0.0
-            causality_b_to_a = 0.0
-        
-        return {
-            'a_to_b': causality_a_to_b,
-            'b_to_a': causality_b_to_a
-        }
-    
     def _calculate_interaction_coefficients(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
     ) -> Dict[str, Dict[str, float]]:
-        """相互作用係数計算"""
+        """相互作用係数計算（Lambda³理論準拠）"""
         
-        # 張力スカラー相互作用
-        tension_interaction = self._calculate_tension_interaction(features_a, features_b)
+        # 構造-張力相互作用
+        structure_tension_interaction = self._calculate_structure_tension_interaction(
+            components_a, components_b, min_length
+        )
         
-        # 構造変化相互作用
-        structure_interaction = self._calculate_structure_interaction(features_a, features_b)
+        # 階層間相互作用（階層的特徴が利用可能な場合）
+        if components_a.get('local_pos') is not None and components_b.get('local_pos') is not None:
+            hierarchical_interaction = self._calculate_hierarchical_coefficients(
+                components_a, components_b, min_length
+            )
+        else:
+            hierarchical_interaction = {}
         
         return {
-            'tension': tension_interaction,
-            'structure': structure_interaction
+            'structure_tension': structure_tension_interaction,
+            'hierarchical': hierarchical_interaction
         }
     
-    def _calculate_tension_interaction(
+    def _calculate_structure_tension_interaction(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
     ) -> Dict[str, float]:
-        """張力スカラー相互作用計算"""
+        """構造-張力相互作用計算"""
         
-        # 張力データ取得
-        rho_a = self._get_tension_data(features_a)
-        rho_b = self._get_tension_data(features_b)
+        # 構造変化→張力への影響
+        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
+        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
+        rho_a = components_a['rho_T'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
         
-        if len(rho_a) > 0 and len(rho_b) > 0:
-            min_length = min(len(rho_a), len(rho_b))
-            rho_a = rho_a[:min_length]
-            rho_b = rho_b[:min_length]
-            
-            # 張力相関
-            if min_length > 1:
-                tension_correlation = np.corrcoef(rho_a, rho_b)[0, 1]
-                if np.isnan(tension_correlation):
-                    tension_correlation = 0.0
-            else:
-                tension_correlation = 0.0
-            
-            # 張力因果性
-            tension_causality_ab = self._calculate_lagged_correlation(rho_a, rho_b)
-            tension_causality_ba = self._calculate_lagged_correlation(rho_b, rho_a)
-        else:
-            tension_correlation = 0.0
-            tension_causality_ab = 0.0
-            tension_causality_ba = 0.0
+        # 構造変化時の張力応答
+        structure_to_tension_a = 0.0
+        structure_to_tension_b = 0.0
+        
+        if np.sum(events_a) > 0:
+            # A構造変化時のB張力応答
+            event_indices_a = np.where(events_a > 0)[0]
+            for idx in event_indices_a:
+                if idx + 5 < min_length:  # 5ステップ先まで見る
+                    tension_response = np.mean(rho_b[idx:idx+5])
+                    baseline = np.mean(rho_b[max(0, idx-5):idx]) if idx > 0 else np.mean(rho_b)
+                    structure_to_tension_a += abs(tension_response - baseline)
+            structure_to_tension_a /= (len(event_indices_a) + 1e-8)
+        
+        if np.sum(events_b) > 0:
+            # B構造変化時のA張力応答
+            event_indices_b = np.where(events_b > 0)[0]
+            for idx in event_indices_b:
+                if idx + 5 < min_length:
+                    tension_response = np.mean(rho_a[idx:idx+5])
+                    baseline = np.mean(rho_a[max(0, idx-5):idx]) if idx > 0 else np.mean(rho_a)
+                    structure_to_tension_b += abs(tension_response - baseline)
+            structure_to_tension_b /= (len(event_indices_b) + 1e-8)
         
         return {
-            'correlation': tension_correlation,
-            'causality_a_to_b': tension_causality_ab,
-            'causality_b_to_a': tension_causality_ba
+            'structure_a_to_tension_b': structure_to_tension_a,
+            'structure_b_to_tension_a': structure_to_tension_b
         }
     
-    def _get_tension_data(self, features: StructuralTensorProtocol) -> np.ndarray:
-        """張力データ取得"""
-        
-        if hasattr(features, 'rho_T') and features.rho_T is not None:
-            return features.rho_T
-        elif isinstance(features, dict) and 'rho_T' in features:
-            return features['rho_T'] if features['rho_T'] is not None else np.array([])
-        else:
-            return np.array([])
-    
-    def _calculate_structure_interaction(
+    def _calculate_hierarchical_coefficients(
         self,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
     ) -> Dict[str, float]:
-        """構造変化相互作用計算"""
+        """階層間相互作用係数計算"""
         
-        events_a = self._get_structure_events(features_a)
-        events_b = self._get_structure_events(features_b)
+        # 局所→大域相互作用
+        local_to_global_a = 0.0
+        local_to_global_b = 0.0
         
-        if len(events_a) > 0 and len(events_b) > 0:
-            min_length = min(len(events_a), len(events_b))
-            events_a = events_a[:min_length]
-            events_b = events_b[:min_length]
-            
-            # 構造変化同時発生率
-            joint_events = np.mean(events_a * events_b)
-            
-            # 構造変化因果効果
-            causality_ab = self._calculate_lagged_correlation(events_a, events_b)
-            causality_ba = self._calculate_lagged_correlation(events_b, events_a)
-        else:
-            joint_events = 0.0
-            causality_ab = 0.0
-            causality_ba = 0.0
+        # 局所イベント
+        local_events_a = (components_a['local_pos'][:min_length] + 
+                         components_a['local_neg'][:min_length])
+        local_events_b = (components_b['local_pos'][:min_length] + 
+                         components_b['local_neg'][:min_length])
+        
+        # 大域イベント
+        global_events_a = (components_a['global_pos'][:min_length] + 
+                          components_a['global_neg'][:min_length])
+        global_events_b = (components_b['global_pos'][:min_length] + 
+                          components_b['global_neg'][:min_length])
+        
+        # 局所Aが大域Bに与える影響
+        if np.sum(local_events_a) > 0 and np.sum(global_events_b) > 0:
+            local_to_global_a = np.sum(local_events_a * global_events_b) / np.sum(local_events_a)
+        
+        # 局所Bが大域Aに与える影響
+        if np.sum(local_events_b) > 0 and np.sum(global_events_a) > 0:
+            local_to_global_b = np.sum(local_events_b * global_events_a) / np.sum(local_events_b)
         
         return {
-            'joint_events': joint_events,
-            'causality_a_to_b': causality_ab,
-            'causality_b_to_a': causality_ba
+            'local_a_to_global_b': local_to_global_a,
+            'local_b_to_global_a': local_to_global_b
         }
     
-    def _calculate_phase_coupling(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """位相結合計算"""
+    def _calculate_phase_coupling(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, float]:
+        """位相結合計算（構造テンソルベース）"""
         
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            return self._calculate_phase_coupling_jit(data_a, data_b)
-        else:
-            return self._calculate_phase_coupling_python(data_a, data_b)
-    
-    def _calculate_phase_coupling_jit(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """JIT位相結合計算"""
+        rho_a = components_a['rho_T'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
         
-        try:
-            # JIT関数で位相結合検出
-            coupling_strength, phase_lag = detect_phase_coupling_fixed(data_a, data_b)
+        if len(rho_a) > 10 and len(rho_b) > 10:
+            # 張力変化率（位相情報）
+            phase_a = np.diff(rho_a)
+            phase_b = np.diff(rho_b)
             
-            return {
-                'coupling_strength': float(coupling_strength),
-                'phase_lag': float(phase_lag)
-            }
-            
-        except Exception as e:
-            print(f"JIT phase coupling calculation failed: {e}, falling back to Python")
-            return self._calculate_phase_coupling_python(data_a, data_b)
-    
-    def _calculate_phase_coupling_python(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """Python位相結合計算（簡易版）"""
-        
-        # 簡易位相結合（相関ベース）
-        if len(data_a) > 10 and len(data_b) > 10:
-            # 差分ベースの位相情報
-            phase_a = np.diff(data_a)
-            phase_b = np.diff(data_b)
-            
-            min_length = min(len(phase_a), len(phase_b))
-            phase_a = phase_a[:min_length]
-            phase_b = phase_b[:min_length]
-            
-            if min_length > 1:
+            # 位相同期
+            if len(phase_a) > 1 and len(phase_b) > 1:
                 coupling_strength = abs(np.corrcoef(phase_a, phase_b)[0, 1])
                 if np.isnan(coupling_strength):
                     coupling_strength = 0.0
                 
-                # 位相遅延（クロス相関ピーク位置）
+                # 位相遅延
                 cross_corr = np.correlate(phase_a, phase_b, mode='full')
                 phase_lag = np.argmax(cross_corr) - len(phase_a) + 1
             else:
                 coupling_strength = 0.0
-                phase_lag = 0.0
+                phase_lag = 0
         else:
             coupling_strength = 0.0
-            phase_lag = 0.0
+            phase_lag = 0
         
         return {
             'coupling_strength': coupling_strength,
             'phase_lag': float(phase_lag)
         }
     
-    def _assess_correlation_quality(self, data_a: np.ndarray, data_b: np.ndarray) -> float:
-        """相関品質評価"""
+    def _assess_structure_quality(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> float:
+        """構造品質評価"""
         
-        # データ長による品質
-        length_quality = min(1.0, len(data_a) / 50)  # 50点以上で満点
+        # データ長品質
+        length_quality = min(1.0, min_length / 50)
         
-        # 分散による品質
-        var_a = np.var(data_a)
-        var_b = np.var(data_b)
-        variance_quality = 1.0 if var_a > 1e-8 and var_b > 1e-8 else 0.5
+        # 構造変化の豊富さ
+        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
+        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
         
-        # 有限値による品質
-        finite_quality_a = np.sum(np.isfinite(data_a)) / len(data_a)
-        finite_quality_b = np.sum(np.isfinite(data_b)) / len(data_b)
-        finite_quality = (finite_quality_a + finite_quality_b) / 2
+        event_density_a = np.sum(events_a) / min_length
+        event_density_b = np.sum(events_b) / min_length
+        
+        # 適度な構造変化密度（0.05-0.2が理想的）
+        density_quality_a = min(1.0, event_density_a / 0.1) if event_density_a < 0.2 else 0.5
+        density_quality_b = min(1.0, event_density_b / 0.1) if event_density_b < 0.2 else 0.5
+        density_quality = (density_quality_a + density_quality_b) / 2
+        
+        # 張力の変動性
+        rho_std_a = np.std(components_a['rho_T'][:min_length])
+        rho_std_b = np.std(components_b['rho_T'][:min_length])
+        variability_quality = 1.0 if rho_std_a > 1e-3 and rho_std_b > 1e-3 else 0.5
         
         # 統合品質
-        overall_quality = (length_quality * 0.3 + variance_quality * 0.3 + finite_quality * 0.4)
+        overall_quality = (
+            length_quality * 0.3 +
+            density_quality * 0.4 +
+            variability_quality * 0.3
+        )
         
         return overall_quality
     
-    def _calculate_asymmetry_metrics(self, causality_results: Dict[str, float]) -> Dict[str, float]:
+    def _calculate_asymmetry_metrics(
+        self,
+        structure_causality: Dict[str, float],
+        tension_causality: Dict[str, float]
+    ) -> Dict[str, float]:
         """非対称性メトリクス計算"""
         
-        a_to_b = causality_results.get('a_to_b', 0.0)
-        b_to_a = causality_results.get('b_to_a', 0.0)
+        # 構造非対称性
+        structure_asymmetry = abs(
+            structure_causality['a_to_b'] - structure_causality['b_to_a']
+        )
         
-        # 基本非対称性
-        basic_asymmetry = abs(a_to_b - b_to_a)
+        # 張力非対称性
+        tension_asymmetry = abs(
+            tension_causality['a_to_b'] - tension_causality['b_to_a']
+        )
         
-        # 正規化非対称性
-        total_strength = a_to_b + b_to_a
-        normalized_asymmetry = basic_asymmetry / (total_strength + 1e-8)
+        # 統合非対称性
+        total_asymmetry = (structure_asymmetry + tension_asymmetry) / 2
         
-        # 優勢性指標
-        dominance = max(a_to_b, b_to_a) / (min(a_to_b, b_to_a) + 1e-8)
+        # 優勢性
+        total_a_to_b = (structure_causality['a_to_b'] + tension_causality['a_to_b']) / 2
+        total_b_to_a = (structure_causality['b_to_a'] + tension_causality['b_to_a']) / 2
+        
+        if min(total_a_to_b, total_b_to_a) > 1e-8:
+            dominance = max(total_a_to_b, total_b_to_a) / min(total_a_to_b, total_b_to_a)
+        else:
+            dominance = 1.0
         
         return {
-            'basic_asymmetry': basic_asymmetry,
-            'normalized_asymmetry': normalized_asymmetry,
-            'dominance': dominance,
-            'total_asymmetry': normalized_asymmetry
+            'structure_asymmetry': structure_asymmetry,
+            'tension_asymmetry': tension_asymmetry,
+            'total_asymmetry': total_asymmetry,
+            'dominance': dominance
         }
     
-    def _calculate_causality_patterns(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, Dict[int, float]]:
-        """因果性パターン計算"""
+    def _calculate_causality_patterns(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, Dict[int, float]]:
+        """因果性パターン計算（構造テンソルベース）"""
         
-        patterns = {'a_to_b': {}, 'b_to_a': {}}
+        patterns = {
+            'structure_a_to_b': {},
+            'structure_b_to_a': {},
+            'tension_a_to_b': {},
+            'tension_b_to_a': {}
+        }
         
-        for lag in range(1, min(20, len(data_a) // 10)):
-            if lag < len(data_a):
-                # A→B因果性
-                cause_a = data_a[:-lag]
-                effect_b = data_b[lag:]
-                if len(cause_a) > 1:
-                    corr_ab = np.corrcoef(cause_a, effect_b)[0, 1]
-                    patterns['a_to_b'][lag] = abs(corr_ab) if not np.isnan(corr_ab) else 0.0
-                
-                # B→A因果性
-                cause_b = data_b[:-lag]
-                effect_a = data_a[lag:]
-                if len(cause_b) > 1:
-                    corr_ba = np.corrcoef(cause_b, effect_a)[0, 1]
-                    patterns['b_to_a'][lag] = abs(corr_ba) if not np.isnan(corr_ba) else 0.0
+        # 構造変化イベント
+        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
+        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
+        
+        # 張力
+        rho_a = components_a['rho_T'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
+        
+        # 各遅延での因果性
+        for lag in range(1, min(20, min_length // 10)):
+            # 構造因果性
+            if lag < min_length and np.sum(events_a[:-lag]) > 0:
+                patterns['structure_a_to_b'][lag] = (
+                    np.sum(events_a[:-lag] * events_b[lag:]) / np.sum(events_a[:-lag])
+                )
+            
+            if lag < min_length and np.sum(events_b[:-lag]) > 0:
+                patterns['structure_b_to_a'][lag] = (
+                    np.sum(events_b[:-lag] * events_a[lag:]) / np.sum(events_b[:-lag])
+                )
+            
+            # 張力因果性
+            if lag < min_length and len(rho_a[:-lag]) > 1:
+                corr_ab = np.corrcoef(rho_a[:-lag], rho_b[lag:])[0, 1]
+                patterns['tension_a_to_b'][lag] = abs(corr_ab) if not np.isnan(corr_ab) else 0.0
+            
+            if lag < min_length and len(rho_b[:-lag]) > 1:
+                corr_ba = np.corrcoef(rho_b[:-lag], rho_a[lag:])[0, 1]
+                patterns['tension_b_to_a'][lag] = abs(corr_ba) if not np.isnan(corr_ba) else 0.0
         
         return patterns
     
-    def _calculate_prediction_metrics(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """予測性能メトリクス計算"""
+    def _calculate_hierarchical_interaction(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
+    ) -> Dict[str, float]:
+        """階層的相互作用計算"""
         
-        if len(data_a) < 20 or len(data_b) < 20:
-            return {'prediction_accuracy_a': 0.0, 'prediction_accuracy_b': 0.0}
+        if components_a.get('local_pos') is None or components_b.get('local_pos') is None:
+            return {}
         
-        # 簡易予測精度（直線回帰ベース）
-        mid_point = len(data_a) // 2
+        # 各階層での同期強度
+        local_sync = self._calculate_hierarchical_sync(
+            components_a['local_pos'][:min_length] + components_a['local_neg'][:min_length],
+            components_b['local_pos'][:min_length] + components_b['local_neg'][:min_length]
+        )
         
-        # Aの予測精度
-        train_a = data_a[:mid_point]
-        test_a = data_a[mid_point:]
-        predicted_a = np.linspace(train_a[-1], train_a[-1] + (train_a[-1] - train_a[0]), len(test_a))
-        mse_a = np.mean((test_a - predicted_a) ** 2)
-        baseline_var_a = np.var(test_a)
-        accuracy_a = max(0.0, 1.0 - mse_a / (baseline_var_a + 1e-8))
+        global_sync = self._calculate_hierarchical_sync(
+            components_a['global_pos'][:min_length] + components_a['global_neg'][:min_length],
+            components_b['global_pos'][:min_length] + components_b['global_neg'][:min_length]
+        )
         
-        # Bの予測精度
-        train_b = data_b[:mid_point]
-        test_b = data_b[mid_point:]
-        predicted_b = np.linspace(train_b[-1], train_b[-1] + (train_b[-1] - train_b[0]), len(test_b))
-        mse_b = np.mean((test_b - predicted_b) ** 2)
-        baseline_var_b = np.var(test_b)
-        accuracy_b = max(0.0, 1.0 - mse_b / (baseline_var_b + 1e-8))
+        # クロススケール相互作用
+        cross_scale_a_to_b = self._calculate_cross_scale_interaction(
+            components_a['local_pos'][:min_length] + components_a['local_neg'][:min_length],
+            components_b['global_pos'][:min_length] + components_b['global_neg'][:min_length]
+        )
         
-        return {
-            'prediction_accuracy_a': accuracy_a,
-            'prediction_accuracy_b': accuracy_b
-        }
-    
-    def _calculate_interaction_quality(self, sync_results: Dict, causality_results: Dict, correlation_quality: float) -> Dict[str, float]:
-        """相互作用品質計算"""
-        
-        # 同期品質
-        sync_quality = sync_results.get('sync_strength', 0.0)
-        
-        # 因果品質
-        causality_quality = (causality_results.get('a_to_b', 0.0) + causality_results.get('b_to_a', 0.0)) / 2
-        
-        # 非対称性品質
-        asymmetry_quality = abs(causality_results.get('a_to_b', 0.0) - causality_results.get('b_to_a', 0.0))
-        
-        # 統合品質
-        interaction_quality = sync_quality * 0.4
-        overall_quality = (
-            sync_quality * 0.3 +
-            causality_quality * 0.3 +
-            correlation_quality * 0.4
+        cross_scale_b_to_a = self._calculate_cross_scale_interaction(
+            components_b['local_pos'][:min_length] + components_b['local_neg'][:min_length],
+            components_a['global_pos'][:min_length] + components_a['global_neg'][:min_length]
         )
         
         return {
-            'interaction_quality': interaction_quality,
-            'asymmetry_quality': asymmetry_quality,
-            'synchronization_quality': sync_quality,
+            'local_sync': local_sync,
+            'global_sync': global_sync,
+            'cross_scale_a_to_b': cross_scale_a_to_b,
+            'cross_scale_b_to_a': cross_scale_b_to_a
+        }
+    
+    def _calculate_hierarchical_sync(self, events_a: np.ndarray, events_b: np.ndarray) -> float:
+        """階層的同期計算"""
+        if np.sum(events_a) > 0 and np.sum(events_b) > 0:
+            return np.sum(events_a * events_b) / min(np.sum(events_a), np.sum(events_b))
+        return 0.0
+    
+    def _calculate_cross_scale_interaction(self, local_events: np.ndarray, global_events: np.ndarray) -> float:
+        """クロススケール相互作用計算"""
+        if np.sum(local_events) > 0 and np.sum(global_events) > 0:
+            # 局所イベントが大域イベントに先行する確率
+            interaction = 0.0
+            for lag in range(1, min(10, len(local_events) // 10)):
+                if lag < len(global_events):
+                    lagged_interaction = np.sum(local_events[:-lag] * global_events[lag:])
+                    interaction = max(interaction, lagged_interaction / (np.sum(local_events[:-lag]) + 1e-8))
+            return interaction
+        return 0.0
+    
+    def _calculate_interaction_quality(
+        self,
+        structure_sync: Dict[str, Any],
+        tension_sync: Dict[str, Any],
+        structure_causality: Dict[str, float],
+        tension_causality: Dict[str, float],
+        structure_quality: float
+    ) -> Dict[str, float]:
+        """相互作用品質計算"""
+        
+        # 同期品質
+        sync_quality = (structure_sync['sync_strength'] + tension_sync['sync_strength']) / 2
+        
+        # 因果品質
+        causality_quality = (
+            (structure_causality['a_to_b'] + structure_causality['b_to_a'] +
+             tension_causality['a_to_b'] + tension_causality['b_to_a']) / 4
+        )
+        
+        # 総合品質
+        overall_quality = (
+            sync_quality * 0.3 +
+            causality_quality * 0.3 +
+            structure_quality * 0.4
+        )
+        
+        return {
+            'sync_quality': sync_quality,
             'causality_quality': causality_quality,
+            'structure_quality': structure_quality,
             'overall_quality': overall_quality
         }
     
-    def _fit_bayesian_pairwise_model(
+    def _calculate_asymmetry_index(
         self,
-        data_a: np.ndarray,
-        data_b: np.ndarray,
-        features_a: StructuralTensorProtocol,
-        features_b: StructuralTensorProtocol
+        structure_causality: Dict[str, float],
+        tension_causality: Dict[str, float]
+    ) -> float:
+        """非対称性指標計算"""
+        
+        # 各成分の非対称性
+        structure_asym = abs(structure_causality['a_to_b'] - structure_causality['b_to_a'])
+        tension_asym = abs(tension_causality['a_to_b'] - tension_causality['b_to_a'])
+        
+        # 統合非対称性（重み付き平均）
+        return structure_asym * 0.6 + tension_asym * 0.4
+    
+    def _calculate_interaction_strength(
+        self,
+        structure_sync: Dict[str, Any],
+        tension_sync: Dict[str, Any],
+        structure_causality: Dict[str, float],
+        tension_causality: Dict[str, float]
+    ) -> float:
+        """相互作用強度計算"""
+        
+        # 同期成分
+        sync_strength = (structure_sync['sync_strength'] + tension_sync['sync_strength']) / 2
+        
+        # 因果成分
+        causality_strength = (
+            structure_causality['a_to_b'] + structure_causality['b_to_a'] +
+            tension_causality['a_to_b'] + tension_causality['b_to_a']
+        ) / 4
+        
+        # 統合強度
+        return sync_strength * 0.5 + causality_strength * 0.5
+    
+    def _analyze_with_bayesian(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any]
+    ) -> PairwiseInteractionResults:
+        """ベイズペアワイズ分析（Lambda³理論準拠）"""
+        
+        name_a = components_a['name']
+        name_b = components_b['name']
+        
+        print(f"Running Bayesian pairwise analysis: {name_a} ↔ {name_b}")
+        
+        # データ長の統一
+        min_length = min(
+            len(components_a['delta_pos']),
+            len(components_b['delta_pos'])
+        )
+        
+        # ベイズモデル構築と推定
+        trace, model = self._fit_bayesian_lambda3_model(components_a, components_b, min_length)
+        
+        # ベイズ結果から係数抽出
+        bayesian_coeffs = self._extract_bayesian_coefficients(trace)
+        
+        # 標準分析も実行（比較用）
+        standard_results = self._analyze_standard(components_a, components_b)
+        
+        # ベイズ結果で更新
+        standard_results.analysis_method = 'bayesian'
+        standard_results.bayesian_trace = trace
+        
+        # ベイズ係数で因果性を更新
+        if 'structure_a_to_b' in bayesian_coeffs:
+            standard_results.structure_causality_a_to_b = bayesian_coeffs['structure_a_to_b']
+            standard_results.structure_causality_b_to_a = bayesian_coeffs['structure_b_to_a']
+            standard_results.tension_causality_a_to_b = bayesian_coeffs['tension_a_to_b']
+            standard_results.tension_causality_b_to_a = bayesian_coeffs['tension_b_to_a']
+        
+        return standard_results
+    
+    def _fit_bayesian_lambda3_model(
+        self,
+        components_a: Dict[str, Any],
+        components_b: Dict[str, Any],
+        min_length: int
     ) -> Tuple[Any, Any]:
-        """ベイズペアワイズモデル推定"""
+        """Lambda³ベイズモデル推定"""
         
-        # 張力データ取得
-        rho_a = self._get_tension_data(features_a)
-        rho_b = self._get_tension_data(features_b)
+        # 構造テンソル成分の準備
+        delta_pos_a = components_a['delta_pos'][:min_length]
+        delta_neg_a = components_a['delta_neg'][:min_length]
+        rho_a = components_a['rho_T'][:min_length]
         
-        # データ長統一
-        min_length = min(len(data_a), len(data_b), len(rho_a), len(rho_b))
-        if min_length < 10:
-            raise Lambda3Error("Insufficient data for Bayesian analysis")
-        
-        rho_a = rho_a[:min_length]
-        rho_b = rho_b[:min_length]
+        delta_pos_b = components_b['delta_pos'][:min_length]
+        delta_neg_b = components_b['delta_neg'][:min_length]
+        rho_b = components_b['rho_T'][:min_length]
         
         with pm.Model() as model:
-            # 事前分布
-            beta_a_to_b = pm.Normal('beta_a_to_b', mu=0, sigma=1)
-            beta_b_to_a = pm.Normal('beta_b_to_a', mu=0, sigma=1)
-            alpha_sync = pm.Normal('alpha_sync', mu=0, sigma=0.5)
+            # === 構造相互作用パラメータ ===
+            # A → B 構造影響
+            beta_struct_ab_pos = pm.Normal('beta_struct_ab_pos', mu=0, sigma=2)
+            beta_struct_ab_neg = pm.Normal('beta_struct_ab_neg', mu=0, sigma=2)
             
-            # 相互作用効果
-            interaction_ab = beta_a_to_b * rho_a
-            interaction_ba = beta_b_to_a * rho_b
-            sync_effect = alpha_sync
+            # B → A 構造影響
+            beta_struct_ba_pos = pm.Normal('beta_struct_ba_pos', mu=0, sigma=2)
+            beta_struct_ba_neg = pm.Normal('beta_struct_ba_neg', mu=0, sigma=2)
             
-            # 観測モデル（簡易版）
-            mu_a = interaction_ba + sync_effect
-            mu_b = interaction_ab + sync_effect
+            # === 張力相互作用パラメータ ===
+            beta_tension_ab = pm.Normal('beta_tension_ab', mu=0, sigma=1.5)
+            beta_tension_ba = pm.Normal('beta_tension_ba', mu=0, sigma=1.5)
             
-            sigma_a = pm.HalfNormal('sigma_a', sigma=1)
-            sigma_b = pm.HalfNormal('sigma_b', sigma=1)
+            # === 構造→張力変換パラメータ ===
+            gamma_struct_to_tension_a = pm.Normal('gamma_struct_to_tension_a', mu=0, sigma=1)
+            gamma_struct_to_tension_b = pm.Normal('gamma_struct_to_tension_b', mu=0, sigma=1)
             
-            # 尤度
-            obs_a = pm.Normal('obs_a', mu=mu_a, sigma=sigma_a, observed=rho_a)
-            obs_b = pm.Normal('obs_b', mu=mu_b, sigma=sigma_b, observed=rho_b)
+            # === 張力モデル ===
+            # A系列の張力
+            mu_rho_a = (
+                gamma_struct_to_tension_a * (delta_pos_a + delta_neg_a) +
+                beta_tension_ba * rho_b
+            )
+            
+            # B系列の張力
+            mu_rho_b = (
+                gamma_struct_to_tension_b * (delta_pos_b + delta_neg_b) +
+                beta_tension_ab * rho_a
+            )
+            
+            # ノイズパラメータ
+            sigma_rho_a = pm.HalfNormal('sigma_rho_a', sigma=1)
+            sigma_rho_b = pm.HalfNormal('sigma_rho_b', sigma=1)
+            
+            # 観測モデル
+            obs_rho_a = pm.Normal('obs_rho_a', mu=mu_rho_a, sigma=sigma_rho_a, observed=rho_a)
+            obs_rho_b = pm.Normal('obs_rho_b', mu=mu_rho_b, sigma=sigma_rho_b, observed=rho_b)
             
             # サンプリング
-            trace = pm.sample(1000, tune=500, cores=2, chains=2, return_inferencedata=True)
+            trace = pm.sample(
+                draws=1000,
+                tune=500,
+                target_accept=0.9,
+                return_inferencedata=True,
+                cores=2,
+                chains=2
+            )
         
         return trace, model
     
-    def _extract_bayesian_pairwise_coefficients(self, trace: Any) -> Dict[str, float]:
-        """ベイズペアワイズ係数抽出"""
+    def _extract_bayesian_coefficients(self, trace: Any) -> Dict[str, float]:
+        """ベイズ係数抽出"""
         
         try:
             summary = az.summary(trace)
             
-            beta_a_to_b = summary.loc['beta_a_to_b', 'mean']
-            beta_b_to_a = summary.loc['beta_b_to_a', 'mean']
-            alpha_sync = summary.loc['alpha_sync', 'mean']
-            
             coefficients = {
-                'causality_a_to_b': abs(beta_a_to_b),
-                'causality_b_to_a': abs(beta_b_to_a),
-                'synchronization': abs(alpha_sync),
-                'asymmetry': abs(beta_a_to_b - beta_b_to_a),
-                'a_to_b': abs(beta_a_to_b),
-                'b_to_a': abs(beta_b_to_a)
+                'structure_a_to_b': abs(summary.loc['beta_struct_ab_pos', 'mean'] + 
+                                       summary.loc['beta_struct_ab_neg', 'mean']) / 2,
+                'structure_b_to_a': abs(summary.loc['beta_struct_ba_pos', 'mean'] + 
+                                       summary.loc['beta_struct_ba_neg', 'mean']) / 2,
+                'tension_a_to_b': abs(summary.loc['beta_tension_ab', 'mean']),
+                'tension_b_to_a': abs(summary.loc['beta_tension_ba', 'mean']),
+                'struct_to_tension_a': abs(summary.loc['gamma_struct_to_tension_a', 'mean']),
+                'struct_to_tension_b': abs(summary.loc['gamma_struct_to_tension_b', 'mean'])
             }
             
             return coefficients
             
         except Exception as e:
             print(f"Bayesian coefficient extraction failed: {e}")
-            return {
-                'causality_a_to_b': 0.0,
-                'causality_b_to_a': 0.0,
-                'synchronization': 0.0,
-                'asymmetry': 0.0,
-                'a_to_b': 0.0,
-                'b_to_a': 0.0
-            }
+            return {}
 
 # ==========================================================
 # 便利関数
@@ -1127,7 +1200,7 @@ def analyze_pairwise_interaction(
     use_bayesian: bool = False
 ) -> PairwiseInteractionResults:
     """
-    ペアワイズ相互作用分析の便利関数
+    ペアワイズ相互作用分析の便利関数（Lambda³理論準拠）
     
     Args:
         features_a: 系列Aの構造テンソル特徴量
@@ -1141,100 +1214,6 @@ def analyze_pairwise_interaction(
     analyzer = PairwiseAnalyzer(config=config)
     return analyzer.analyze_asymmetric_interaction(features_a, features_b, use_bayesian=use_bayesian)
 
-def compare_all_pairs(
-    features_dict: Dict[str, StructuralTensorProtocol],
-    config: Optional[Any] = None
-) -> Dict[str, PairwiseInteractionResults]:
-    """
-    全ペア比較分析
-    
-    Args:
-        features_dict: 特徴量辞書
-        config: 設定オブジェクト
-        
-    Returns:
-        Dict[str, PairwiseInteractionResults]: ペア別分析結果
-    """
-    analyzer = PairwiseAnalyzer(config=config)
-    results = {}
-    
-    series_names = list(features_dict.keys())
-    
-    for i, name_a in enumerate(series_names):
-        for j, name_b in enumerate(series_names):
-            if i < j:  # 重複回避
-                pair_key = f"{name_a}_vs_{name_b}"
-                
-                try:
-                    result = analyzer.analyze_asymmetric_interaction(
-                        features_dict[name_a],
-                        features_dict[name_b]
-                    )
-                    results[pair_key] = result
-                except Exception as e:
-                    print(f"Pairwise analysis failed for {pair_key}: {e}")
-                    continue
-    
-    return results
-
-def analyze_network_structure(
-    features_dict: Dict[str, StructuralTensorProtocol],
-    config: Optional[Any] = None,
-    sync_threshold: float = 0.3
-) -> Dict[str, Any]:
-    """
-    ネットワーク構造分析
-    
-    Args:
-        features_dict: 特徴量辞書
-        config: 設定オブジェクト
-        sync_threshold: 同期閾値
-        
-    Returns:
-        Dict[str, Any]: ネットワーク分析結果
-    """
-    # 全ペア分析
-    pairwise_results = compare_all_pairs(features_dict, config)
-    
-    # ネットワーク構築
-    series_names = list(features_dict.keys())
-    n_series = len(series_names)
-    
-    # 同期行列構築
-    sync_matrix = np.zeros((n_series, n_series))
-    
-    for i, name_a in enumerate(series_names):
-        for j, name_b in enumerate(series_names):
-            if i != j:
-                pair_key = f"{name_a}_vs_{name_b}" if i < j else f"{name_b}_vs_{name_a}"
-                
-                if pair_key in pairwise_results:
-                    sync_strength = pairwise_results[pair_key].synchronization_strength
-                    sync_matrix[i, j] = sync_strength
-            else:
-                sync_matrix[i, j] = 1.0
-    
-    # ネットワーク統計
-    network_density = np.mean(sync_matrix[sync_matrix < 1.0])
-    max_sync = np.max(sync_matrix[sync_matrix < 1.0]) if np.any(sync_matrix < 1.0) else 0.0
-    
-    # 強結合ペア
-    strong_pairs = []
-    for i, name_a in enumerate(series_names):
-        for j, name_b in enumerate(series_names):
-            if i < j and sync_matrix[i, j] >= sync_threshold:
-                strong_pairs.append((name_a, name_b, sync_matrix[i, j]))
-    
-    return {
-        'synchronization_matrix': sync_matrix.tolist(),
-        'series_names': series_names,
-        'network_density': network_density,
-        'max_synchronization': max_sync,
-        'strong_pairs': strong_pairs,
-        'network_size': n_series,
-        'pairwise_results': pairwise_results
-    }
-
 # ==========================================================
 # モジュール情報
 # ==========================================================
@@ -1242,70 +1221,5 @@ def analyze_network_structure(
 __all__ = [
     'PairwiseInteractionResults',
     'PairwiseAnalyzer',
-    'analyze_pairwise_interaction',
-    'compare_all_pairs',
-    'analyze_network_structure'
+    'analyze_pairwise_interaction'
 ]
-
-# ==========================================================
-# テスト関数
-# ==========================================================
-
-def test_pairwise_analysis():
-    """ペアワイズ分析のテスト"""
-    print("🧪 Testing Pairwise Analysis Implementation")
-    print("=" * 50)
-    
-    try:
-        # サンプルデータ生成
-        np.random.seed(42)
-        sample_data_a = np.cumsum(np.random.randn(80) * 0.1)
-        sample_data_b = np.cumsum(np.random.randn(80) * 0.12)
-        
-        # 構造テンソル特徴量作成（Protocol準拠）
-        if STRUCTURAL_TENSOR_AVAILABLE:
-            from ..core.structural_tensor import extract_lambda3_features
-            features_a = extract_lambda3_features(sample_data_a, series_name="Test_A")
-            features_b = extract_lambda3_features(sample_data_b, series_name="Test_B")
-        else:
-            # フォールバック：辞書形式
-            features_a = {
-                'data': sample_data_a,
-                'series_name': 'Test_A',
-                'delta_LambdaC_pos': np.random.randint(0, 2, 80).astype(np.float64),
-                'delta_LambdaC_neg': np.random.randint(0, 2, 80).astype(np.float64),
-                'rho_T': np.random.rand(80)
-            }
-            features_b = {
-                'data': sample_data_b,
-                'series_name': 'Test_B',
-                'delta_LambdaC_pos': np.random.randint(0, 2, 80).astype(np.float64),
-                'delta_LambdaC_neg': np.random.randint(0, 2, 80).astype(np.float64),
-                'rho_T': np.random.rand(80)
-            }
-        
-        # ペアワイズ分析実行
-        analyzer = PairwiseAnalyzer()
-        results = analyzer.analyze_asymmetric_interaction(features_a, features_b)
-        
-        print(f"✅ Analysis completed: {results.name_a} ↔ {results.name_b}")
-        print(f"✅ Synchronization strength: {results.synchronization_strength:.3f}")
-        print(f"✅ Causality A→B: {results.causality_a_to_b:.3f}")
-        print(f"✅ Causality B→A: {results.causality_b_to_a:.3f}")
-        print(f"✅ Asymmetry index: {results.asymmetry_index:.3f}")
-        print(f"✅ Dominant direction: {results.get_dominant_direction()}")
-        print(f"✅ Bidirectional coupling: {results.calculate_bidirectional_coupling():.3f}")
-        
-        # Protocol準拠確認
-        if TYPES_AVAILABLE:
-            print(f"✅ Protocol compatibility: {'OK' if hasattr(results, 'get_interaction_summary') else 'NG'}")
-        
-        print("🎯 Pairwise analysis test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Test failed: {e}")
-        return False
-
-if __name__ == "__main__":
-    test_pairwise_analysis()
