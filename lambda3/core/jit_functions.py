@@ -2,7 +2,7 @@
 # lambda3/core/jit_functions.py (完全版)
 # JIT-Optimized Core Functions for Lambda³ Theory
 #
-# Author: Mamichi Iizumi (Miosync, Inc.)
+# Author: Masamichi Iizumi (Miosync, Inc.)
 # License: MIT
 #
 # 完全版: 全関数実装、Numba型エラー修正、プロジェクトナレッジ完全準拠
