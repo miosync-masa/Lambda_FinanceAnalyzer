@@ -1,10 +1,10 @@
 # ==========================================================
-# pyproject.toml - Lambda³ Finance Analyzer Modern Package Configuration
+# pyproject.toml - Lambda³ Finance Analyzer Modern Configuration
 # 
 # Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
-# 革新ポイント: PEP 518/621準拠の現代的パッケージ設定
+# 修正ポイント: setup.pyとの競合解消、パッケージ発見の最適化
 # ==========================================================
 
 [build-system]
@@ -188,16 +188,23 @@ lambda3-financial = "lambda3.cli:financial_command"
 lambda3-benchmark = "lambda3.cli:benchmark_command"
 
 # ==========================================================
-# TOOL CONFIGURATIONS - 開発ツール設定
+# SETUPTOOLS CONFIGURATION - パッケージ発見の最適化
 # ==========================================================
 
 [tool.setuptools]
+# パッケージ自動発見（修正版）
 packages = ["lambda3"]
 include-package-data = true
 zip-safe = false
 
+# 明示的パッケージ指定（フォールバック）
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lambda3*"]
+exclude = ["tests*", "docs*", "examples*"]
+
 [tool.setuptools.dynamic]
-version = {attr = "lambda3.__version__"}
+version = {attr = "lambda3.version.__version__"}
 
 [tool.setuptools.package-data]
 lambda3 = [
@@ -209,6 +216,10 @@ lambda3 = [
     "static/css/*.css",
     "static/js/*.js",
 ]
+
+# ==========================================================
+# TOOL CONFIGURATIONS - 開発ツール設定
+# ==========================================================
 
 # Black コードフォーマッター
 [tool.black]
@@ -371,43 +382,6 @@ per-file-ignores = [
 exclude_dirs = ["tests", "docs"]
 skips = ["B101", "B601"]  # assert_used, paramiko_calls
 
-# Pre-commit フック設定
-[tool.pre-commit]
-repos = [
-    {
-        repo = "https://github.com/pre-commit/pre-commit-hooks",
-        rev = "v4.4.0",
-        hooks = [
-            {id = "trailing-whitespace"},
-            {id = "end-of-file-fixer"},
-            {id = "check-yaml"},
-            {id = "check-added-large-files"},
-            {id = "check-toml"},
-            {id = "check-json"},
-        ]
-    },
-    {
-        repo = "https://github.com/psf/black",
-        rev = "22.12.0", 
-        hooks = [{id = "black"}]
-    },
-    {
-        repo = "https://github.com/pycqa/isort",
-        rev = "5.12.0",
-        hooks = [{id = "isort"}]
-    },
-    {
-        repo = "https://github.com/pycqa/flake8", 
-        rev = "6.0.0",
-        hooks = [{id = "flake8"}]
-    },
-    {
-        repo = "https://github.com/pre-commit/mirrors-mypy",
-        rev = "v0.991",
-        hooks = [{id = "mypy"}]
-    },
-]
-
 # ==========================================================
 # BUILD AND DISTRIBUTION - ビルド・配布設定
 # ==========================================================
@@ -446,24 +420,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "myst_parser",
 ]
-
-# ==========================================================
-# JUPYTER BOOK - Jupyter Book設定（オプション）
-# ==========================================================
-
-[tool.jupyter-book]
-title = "Lambda³ Theory Documentation"
-author = "Mamichi Iizumi"
-logo = "docs/static/lambda3_logo.png"
-execute_notebooks = "force"
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
-
-[tool.jupyter-book.sphinx]
-config = {
-    html_theme = "sphinx_book_theme",
-    html_title = "Lambda³ Finance Analyzer",
-    html_logo = "static/lambda3_logo.png",
-}
 
 # ==========================================================
 # PERFORMANCE PROFILING - 性能プロファイリング設定  
@@ -512,5 +468,38 @@ commands = sphinx-build -W -b html docs/source docs/build
 """
 
 # ==========================================================
-# METADATA - メタデータ
+# INSTALLATION INSTRUCTIONS - インストール手順
 # ==========================================================
+
+# インストール方法:
+#
+# 1. 基本インストール:
+#    pip install .
+#
+# 2. 開発インストール:
+#    pip install -e .
+#
+# 3. 完全インストール:
+#    pip install .[complete]
+#
+# 4. 金融分析用:
+#    pip install .[financial,visualization]
+#
+# 5. ベイズ分析用:
+#    pip install .[bayesian,financial]
+#
+# 6. 開発環境:
+#    pip install -e .[dev]
+
+# トラブルシューティング:
+#
+# 1. パッケージが見つからない場合:
+#    pip uninstall lambda3
+#    pip install -e .
+#
+# 2. JIT最適化が無効な場合:
+#    pip install numba>=0.56.0
+#
+# 3. 依存関係エラーの場合:
+#    pip install --upgrade pip
+#    pip install -r requirements.txt
