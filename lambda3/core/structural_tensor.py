@@ -1,819 +1,600 @@
 # ==========================================================
-# lambda3/core/structural_tensor.py (完全修正版)
-# Structural Tensor Implementation for Lambda³ Theory
+# lambda3/core/structural_tensor.py (∆ΛC完全修正版)
+# Structural Tensor Feature Extraction for Lambda³ Theory
+#
+# Author: Masamichi Iizumi (Miosync, Inc.)
+# License: MIT
+#
+# 完全修正版: JIT統合、階層的特徴量抽出、型安全性の完全実装
 # ==========================================================
 
 """
-Lambda³理論構造テンソル実装（完全修正版）
+Lambda³構造テンソル特徴量抽出（∆ΛC完全修正版）
 
-NumPy axis問題の根本解決と全実装のリファクタリング。
-構造テンソル演算の型安全性とデータ次元の確実な処理を実現。
+構造テンソル(Λ)、進行ベクトル(ΛF)、張力スカラー(ρT)の
+包括的特徴量抽出システム。時間非依存の構造空間における
+∆ΛC pulsations検出と階層的構造変化の完全実装。
 
-修正点:
-- NumPy axis問題の完全解決
-- データ次元チェックの強化
-- 型安全性の確保
-- エラーハンドリングの改善
-- プロジェクトナレッジ完全準拠
-
-Author: Masamichi Iizumi (Miosync, Inc.)
-License: MIT
+完全修正内容:
+- JIT関数統合の完全性確保
+- 階層的特徴量（7特徴量）の確実な抽出
+- 型安全性とProtocol準拠
+- エラーハンドリングの強化
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Tuple, Optional, Any, Union, Protocol
 from dataclasses import dataclass, field
 import warnings
-import time
-from pathlib import Path
+from datetime import datetime
 
-# 型定義のインポート（循環回避）
-try:
-    from .types import (
-        StructuralTensorProtocol,
-        ConfigProtocol,
-        FloatArray,
-        ArrayLike,
-        LambdaTensorValue,
-        DeltaLambdaC,
-        RhoTensor,
-        ensure_float_array,
-        ensure_series_name,
-        validate_array_like,
-        StructuralTensorError,
-        FeatureLevel
-    )
-    TYPES_AVAILABLE = True
-except ImportError as e:
-    # フォールバック：最小限の型定義
-    TYPES_AVAILABLE = False
-    FloatArray = np.ndarray
-    ArrayLike = Union[np.ndarray, List[float]]
-    StructuralTensorError = Exception
-    warnings.warn(f"Types module not available: {e}")
+# Type definitions
+FloatArray = Union[np.ndarray, List[float]]
 
-# JIT最適化関数のインポート（オプション）
+# Import JIT functions with fallback
 try:
     from .jit_functions import (
-        calculate_diff_and_threshold_fixed,
-        detect_structural_jumps_fixed,
-        calculate_tension_scalar_fixed,
-        detect_hierarchical_jumps_fixed,
-        extract_lambda3_features_jit
+        calculate_diff_and_threshold,
+        detect_jumps,
+        calculate_local_std,
+        calculate_rho_t,
+        detect_local_global_jumps,
+        calc_lambda3_features_v2,
+        sync_rate_at_lag,
+        calculate_sync_profile_jit,
+        detect_phase_coupling
     )
-    JIT_FUNCTIONS_AVAILABLE = True
-except ImportError as e:
-    JIT_FUNCTIONS_AVAILABLE = False
-    warnings.warn(f"JIT functions not available: {e}")
+    JIT_AVAILABLE = True
+except ImportError:
+    warnings.warn("JIT functions not available. Using pure Python implementation.")
+    JIT_AVAILABLE = False
 
-# 設定のインポート（循環回避）
+# Import configuration
 try:
     from .config import L3BaseConfig
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    # ダミー設定クラス
-    class L3BaseConfig:
-        def __init__(self):
-            self.window = 10
-            self.threshold_percentile = 95.0
+    L3BaseConfig = None
 
 # ==========================================================
-# UTILITY FUNCTIONS - データ安全性ユーティリティ（新規追加）
+# PROTOCOLS - 型安全性のためのプロトコル定義
 # ==========================================================
 
-def ensure_1d_array(data: Any, name: str = "data") -> np.ndarray:
-    """
-    データを確実に1次元float64配列に変換（Lambda³特化）
+class StructuralTensorProtocol(Protocol):
+    """構造テンソル特徴量プロトコル"""
+    data: np.ndarray
+    series_name: str
+    delta_LambdaC_pos: np.ndarray
+    delta_LambdaC_neg: np.ndarray
+    rho_T: np.ndarray
     
-    Args:
-        data: 入力データ（任意形式）
-        name: データ名（エラー時に使用）
-        
-    Returns:
-        np.ndarray: 1次元float64配列
-        
-    Raises:
-        StructuralTensorError: 変換できない場合
-    """
-    try:
-        # 1. numpy配列に変換
-        if isinstance(data, np.ndarray):
-            arr = data.copy()
-        elif isinstance(data, (list, tuple)):
-            arr = np.array(data)
-        elif hasattr(data, 'values'):  # pandas Series/DataFrame
-            arr = data.values
-        elif hasattr(data, '__array__'):
-            arr = np.array(data)
-        else:
-            arr = np.asarray(data)
-        
-        # 2. 次元チェックと修正
-        if arr.ndim == 0:
-            # スカラー値の場合
-            raise StructuralTensorError(f"{name} is scalar, need at least 1D array")
-        elif arr.ndim == 1:
-            # 既に1次元の場合はそのまま
-            pass
-        elif arr.ndim == 2:
-            # 2次元の場合
-            if arr.shape[0] == 1:
-                # (1, N) -> (N,)
-                arr = arr.flatten()
-            elif arr.shape[1] == 1:
-                # (N, 1) -> (N,)
-                arr = arr.flatten()
-            else:
-                # (M, N) の場合は最初の列を使用
-                warnings.warn(f"{name} is 2D ({arr.shape}), using first column")
-                arr = arr[:, 0]
-        else:
-            # 3次元以上の場合はflatten
-            warnings.warn(f"{name} is {arr.ndim}D, flattening to 1D")
-            arr = arr.flatten()
-        
-        # 3. データ型をfloat64に統一
-        if arr.dtype == np.object_:
-            # オブジェクト型の場合は要素を個別変換
-            try:
-                arr = np.array([float(x) for x in arr], dtype=np.float64)
-            except (ValueError, TypeError):
-                raise StructuralTensorError(f"{name} contains non-numeric values")
-        else:
-            arr = arr.astype(np.float64)
-        
-        # 4. 有限値チェック
-        if not np.all(np.isfinite(arr)):
-            finite_mask = np.isfinite(arr)
-            if not np.any(finite_mask):
-                raise StructuralTensorError(f"{name} contains no finite values")
-            
-            # 無限値・NaN値を修正
-            arr = arr.copy()
-            arr[~finite_mask] = np.nanmean(arr[finite_mask]) if np.any(finite_mask) else 0.0
-            warnings.warn(f"{name} contained non-finite values, replaced with mean")
-        
-        # 5. 最小長チェック
-        if len(arr) < 3:
-            raise StructuralTensorError(f"{name} too short: {len(arr)} < 3")
-        
-        return arr
-        
-    except Exception as e:
-        if isinstance(e, StructuralTensorError):
-            raise
-        else:
-            raise StructuralTensorError(f"Failed to convert {name} to 1D array: {e}")
-
-def safe_diff(data: np.ndarray) -> np.ndarray:
-    """
-    安全な差分計算（axis問題完全回避）
-    
-    Args:
-        data: 1次元入力配列
-        
-    Returns:
-        np.ndarray: 同じ長さの差分配列（初期値は0）
-    """
-    n = len(data)
-    diff_array = np.zeros(n, dtype=np.float64)
-    
-    if n > 1:
-        # 1要素目以降に差分を計算
-        diff_array[1:] = data[1:] - data[:-1]
-        # 初期値は0のまま
-    
-    return diff_array
-
-def safe_percentile(data: np.ndarray, percentile: float, exclude_zeros: bool = True) -> float:
-    """
-    安全なパーセンタイル計算
-    
-    Args:
-        data: 入力データ
-        percentile: パーセンタイル値
-        exclude_zeros: ゼロ値を除外するか
-        
-    Returns:
-        float: パーセンタイル値
-    """
-    if len(data) == 0:
-        return 0.0
-    
-    if exclude_zeros:
-        non_zero_data = data[data != 0.0]
-        if len(non_zero_data) == 0:
-            return 0.0
-        data_for_calc = non_zero_data
-    else:
-        data_for_calc = data
-    
-    try:
-        return float(np.percentile(data_for_calc, percentile))
-    except Exception:
-        return 0.0
-
-def safe_std(data: np.ndarray, min_var: float = 1e-10) -> float:
-    """
-    安全な標準偏差計算
-    
-    Args:
-        data: 入力データ
-        min_var: 最小分散値
-        
-    Returns:
-        float: 標準偏差
-    """
-    if len(data) <= 1:
-        return 0.0
-    
-    try:
-        std_val = float(np.std(data))
-        return max(std_val, min_var)
-    except Exception:
-        return 0.0
+    def get_structural_summary(self) -> Dict[str, Any]: ...
+    def validate_consistency(self) -> Tuple[bool, List[str]]: ...
 
 # ==========================================================
-# 構造テンソル特徴量クラス（完全修正版）
+# EXCEPTIONS - カスタム例外
+# ==========================================================
+
+class StructuralTensorError(Exception):
+    """構造テンソル処理エラー"""
+    pass
+
+class FeatureExtractionError(StructuralTensorError):
+    """特徴量抽出エラー"""
+    pass
+
+# ==========================================================
+# MAIN FEATURE CLASS - 構造テンソル特徴量クラス
 # ==========================================================
 
 @dataclass
 class StructuralTensorFeatures:
     """
-    Lambda³理論構造テンソル特徴量（完全修正版）
+    Lambda³構造テンソル特徴量（完全版）
     
-    NumPy axis問題を根本解決し、型安全性を確保した実装。
-    全ての配列操作で次元チェックと型変換を厳密に実行。
+    ∆ΛC pulsations、ρT、階層的構造変化を包含する
+    完全な特徴量表現。
     """
     
-    # 必須プロパティ
-    data: FloatArray = field(default_factory=lambda: np.array([]))
+    # 基本データ
+    data: np.ndarray
     series_name: str = "Series"
     
-    # 構造テンソル成分
-    delta_LambdaC_pos: Optional[FloatArray] = None
-    delta_LambdaC_neg: Optional[FloatArray] = None  
-    rho_T: Optional[FloatArray] = None
-    time_trend: Optional[FloatArray] = None
+    # 基本構造変化（∆ΛC）
+    delta_LambdaC_pos: np.ndarray = field(default_factory=lambda: np.array([]))
+    delta_LambdaC_neg: np.ndarray = field(default_factory=lambda: np.array([]))
     
-    # 階層的特徴（オプション）
-    local_pos: Optional[FloatArray] = None
-    local_neg: Optional[FloatArray] = None
-    global_pos: Optional[FloatArray] = None
-    global_neg: Optional[FloatArray] = None
+    # 張力スカラー（ρT）
+    rho_T: np.ndarray = field(default_factory=lambda: np.array([]))
+    
+    # 時間トレンド
+    time_trend: Optional[np.ndarray] = None
+    
+    # 階層的構造変化
+    local_pos: Optional[np.ndarray] = None
+    local_neg: Optional[np.ndarray] = None
+    global_pos: Optional[np.ndarray] = None
+    global_neg: Optional[np.ndarray] = None
+    
+    # 追加特徴量
+    local_jump_detect: Optional[np.ndarray] = None
+    pure_local_pos: Optional[np.ndarray] = None
+    pure_local_neg: Optional[np.ndarray] = None
+    pure_global_pos: Optional[np.ndarray] = None
+    pure_global_neg: Optional[np.ndarray] = None
+    mixed_pos: Optional[np.ndarray] = None
+    mixed_neg: Optional[np.ndarray] = None
     
     # メタデータ
-    extraction_timestamp: str = field(default_factory=lambda: time.strftime("%Y%m%d_%H%M%S"))
-    feature_level: str = "basic"
-    extraction_time: float = 0.0
-    
-    # 品質メトリクス
-    data_quality_score: float = 0.0
-    feature_completeness: float = 0.0
-    jit_optimized: bool = False
+    extraction_timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    extraction_method: str = "standard"
+    config_params: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """初期化後処理（完全修正版）"""
-        # データ安全性確保
-        self.data = ensure_1d_array(self.data, "data")
-        self.series_name = ensure_series_name(self.series_name) if TYPES_AVAILABLE else str(self.series_name)
+        """初期化後の検証と調整"""
+        self._validate_features()
+        self._ensure_consistency()
+    
+    def _validate_features(self):
+        """特徴量の妥当性検証"""
+        # データ長の確認
+        data_len = len(self.data)
         
-        # 時間トレンドの自動生成
+        # 基本特徴量の長さ調整
+        for attr in ['delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T']:
+            feature = getattr(self, attr)
+            if len(feature) != data_len:
+                if len(feature) == 0:
+                    setattr(self, attr, np.zeros(data_len, dtype=np.float64))
+                else:
+                    raise FeatureExtractionError(
+                        f"{attr} length mismatch: expected {data_len}, got {len(feature)}"
+                    )
+        
+        # 時間トレンドの生成
         if self.time_trend is None:
-            self.time_trend = np.arange(len(self.data), dtype=np.float64)
-        
-        # 配列長の整合性確保
-        self._ensure_array_consistency()
-        
-        # データ品質評価
-        self._evaluate_data_quality()
-        
-        # 特徴量完全性評価
-        self._evaluate_feature_completeness()
+            self.time_trend = np.arange(data_len, dtype=np.float64)
     
-    def _ensure_array_consistency(self):
-        """配列長の整合性確保"""
-        data_length = len(self.data)
+    def _ensure_consistency(self):
+        """特徴量の整合性確保"""
+        # 階層的特徴量の整合性チェック
+        if self.local_pos is not None and self.global_pos is not None:
+            self._compute_hierarchical_classifications()
+    
+    def _compute_hierarchical_classifications(self):
+        """階層的分類の計算"""
+        n = len(self.data)
         
-        # 全ての特徴量配列の長さをチェック・修正
-        feature_arrays = [
-            'delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend',
-            'local_pos', 'local_neg', 'global_pos', 'global_neg'
-        ]
+        # 初期化
+        self.pure_local_pos = np.zeros(n, dtype=np.float64)
+        self.pure_local_neg = np.zeros(n, dtype=np.float64)
+        self.pure_global_pos = np.zeros(n, dtype=np.float64)
+        self.pure_global_neg = np.zeros(n, dtype=np.float64)
+        self.mixed_pos = np.zeros(n, dtype=np.float64)
+        self.mixed_neg = np.zeros(n, dtype=np.float64)
         
-        for attr_name in feature_arrays:
-            attr_value = getattr(self, attr_name)
-            if attr_value is not None:
-                try:
-                    attr_value = ensure_1d_array(attr_value, attr_name)
-                    
-                    # 長さ調整
-                    if len(attr_value) != data_length:
-                        if len(attr_value) > data_length:
-                            # 長すぎる場合は切り詰め
-                            attr_value = attr_value[:data_length]
-                        else:
-                            # 短すぎる場合は0でパディング
-                            padded = np.zeros(data_length, dtype=np.float64)
-                            padded[:len(attr_value)] = attr_value
-                            attr_value = padded
-                        
-                        warnings.warn(f"{attr_name} length adjusted to match data length")
-                    
-                    setattr(self, attr_name, attr_value)
-                    
-                except Exception as e:
-                    warnings.warn(f"Failed to process {attr_name}: {e}, setting to None")
-                    setattr(self, attr_name, None)
+        # 分類
+        for i in range(n):
+            # 正の構造変化
+            if self.local_pos[i] and self.global_pos[i]:
+                self.mixed_pos[i] = 1.0
+            elif self.local_pos[i] and not self.global_pos[i]:
+                self.pure_local_pos[i] = 1.0
+            elif not self.local_pos[i] and self.global_pos[i]:
+                self.pure_global_pos[i] = 1.0
+            
+            # 負の構造変化
+            if self.local_neg[i] and self.global_neg[i]:
+                self.mixed_neg[i] = 1.0
+            elif self.local_neg[i] and not self.global_neg[i]:
+                self.pure_local_neg[i] = 1.0
+            elif not self.local_neg[i] and self.global_neg[i]:
+                self.pure_global_neg[i] = 1.0
     
-    # Protocol準拠メソッド（修正版）
-    def get_data_length(self) -> int:
-        """データ長取得"""
-        return len(self.data)
-    
-    def get_total_structural_changes(self) -> int:
-        """総構造変化数取得"""
-        total = 0
-        if self.delta_LambdaC_pos is not None:
-            total += int(np.sum(self.delta_LambdaC_pos))
-        if self.delta_LambdaC_neg is not None:
-            total += int(np.sum(self.delta_LambdaC_neg))
-        return total
-    
-    def get_average_tension(self) -> float:
-        """平均張力取得"""
-        if self.rho_T is not None and len(self.rho_T) > 0:
-            return float(np.mean(self.rho_T))
-        return 0.0
-    
-    # 以下、既存メソッドは元のまま保持...
     def get_structural_summary(self) -> Dict[str, Any]:
-        """構造変化サマリー取得"""
-        return {
+        """構造サマリー取得"""
+        total_pos = np.sum(self.delta_LambdaC_pos)
+        total_neg = np.sum(self.delta_LambdaC_neg)
+        
+        summary = {
             'series_name': self.series_name,
-            'data_length': self.get_data_length(),
-            'total_structural_changes': self.get_total_structural_changes(),
-            'average_tension': self.get_average_tension(),
-            'positive_changes': int(np.sum(self.delta_LambdaC_pos)) if self.delta_LambdaC_pos is not None else 0,
-            'negative_changes': int(np.sum(self.delta_LambdaC_neg)) if self.delta_LambdaC_neg is not None else 0,
-            'max_tension': float(np.max(self.rho_T)) if self.rho_T is not None else 0.0,
-            'data_quality_score': self.data_quality_score,
-            'feature_completeness': self.feature_completeness,
-            'jit_optimized': self.jit_optimized
+            'data_length': len(self.data),
+            'total_structural_changes': total_pos + total_neg,
+            'positive_changes': total_pos,
+            'negative_changes': total_neg,
+            'mean_tension': np.mean(self.rho_T),
+            'max_tension': np.max(self.rho_T),
+            'data_quality_score': self._calculate_quality_score(),
+            'extraction_method': self.extraction_method
         }
+        
+        # 階層的特徴量のサマリー追加
+        if self.local_pos is not None:
+            summary['hierarchical_features'] = {
+                'local_events': np.sum(self.local_pos) + np.sum(self.local_neg),
+                'global_events': np.sum(self.global_pos) + np.sum(self.global_neg),
+                'mixed_events': np.sum(self.mixed_pos) + np.sum(self.mixed_neg) if self.mixed_pos is not None else 0
+            }
+        
+        return summary
     
-    def _evaluate_data_quality(self):
-        """データ品質評価"""
-        if len(self.data) == 0:
-            self.data_quality_score = 0.0
-            return
+    def _calculate_quality_score(self) -> float:
+        """データ品質スコア計算"""
+        # 基本的な品質指標
+        has_changes = (np.sum(self.delta_LambdaC_pos) + np.sum(self.delta_LambdaC_neg)) > 0
+        tension_variation = np.std(self.rho_T) / (np.mean(self.rho_T) + 1e-8)
         
-        # 品質スコア計算
-        finite_ratio = np.sum(np.isfinite(self.data)) / len(self.data)
-        variance_score = 1.0 if np.var(self.data) > 1e-10 else 0.5
-        length_score = min(1.0, len(self.data) / 100)  # 100点以上で満点
+        score = 0.5 if has_changes else 0.0
+        score += min(0.5, tension_variation / 2)
         
-        self.data_quality_score = (finite_ratio * 0.5 + variance_score * 0.3 + length_score * 0.2)
+        return min(1.0, score)
     
-    def _evaluate_feature_completeness(self):
-        """特徴量完全性評価"""
-        total_features = 4  # delta_pos, delta_neg, rho_T, time_trend
-        available_features = 0
+    def validate_consistency(self) -> Tuple[bool, List[str]]:
+        """整合性検証"""
+        issues = []
         
-        if self.delta_LambdaC_pos is not None:
-            available_features += 1
-        if self.delta_LambdaC_neg is not None:
-            available_features += 1
-        if self.rho_T is not None:
-            available_features += 1
-        if self.time_trend is not None:
-            available_features += 1
+        # データ長チェック
+        expected_len = len(self.data)
+        for attr in ['delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T']:
+            if len(getattr(self, attr)) != expected_len:
+                issues.append(f"{attr} length mismatch")
         
-        self.feature_completeness = available_features / total_features
+        # 値範囲チェック
+        if np.any(self.delta_LambdaC_pos < 0):
+            issues.append("Negative values in delta_LambdaC_pos")
+        if np.any(self.delta_LambdaC_neg < 0):
+            issues.append("Negative values in delta_LambdaC_neg")
+        if np.any(self.rho_T < 0):
+            issues.append("Negative values in rho_T")
+        
+        # 階層的整合性チェック
+        if self.local_pos is not None and self.global_pos is not None:
+            # グローバルイベントは必ずローカルイベントを含む（理論的には）
+            global_without_local = np.sum((self.global_pos > 0) & (self.local_pos == 0))
+            if global_without_local > len(self.data) * 0.1:  # 10%以上の不整合
+                issues.append("Many global events without local events")
+        
+        return len(issues) == 0, issues
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式変換"""
+        result = {
+            'data': self.data,
+            'series_name': self.series_name,
+            'delta_LambdaC_pos': self.delta_LambdaC_pos,
+            'delta_LambdaC_neg': self.delta_LambdaC_neg,
+            'rho_T': self.rho_T,
+            'time_trend': self.time_trend,
+            'extraction_timestamp': self.extraction_timestamp,
+            'extraction_method': self.extraction_method
+        }
+        
+        # 階層的特徴量を含める
+        if self.local_pos is not None:
+            result.update({
+                'local_pos': self.local_pos,
+                'local_neg': self.local_neg,
+                'global_pos': self.global_pos,
+                'global_neg': self.global_neg
+            })
+        
+        return result
 
 # ==========================================================
-# 構造テンソル抽出器クラス（完全修正版）
+# FEATURE EXTRACTOR - 特徴量抽出器
 # ==========================================================
 
 class StructuralTensorExtractor:
     """
-    構造テンソル特徴量抽出器（完全修正版）
+    構造テンソル特徴量抽出器（完全版）
     
-    NumPy axis問題の根本解決とデータ安全性の確保。
-    全ての演算で次元チェックと型安全性を保証。
+    JIT最適化と純Pythonの両方をサポートする
+    堅牢な特徴量抽出システム。
     """
     
     def __init__(self, config: Optional[Any] = None, use_jit: Optional[bool] = None):
         """
         Args:
-            config: 設定オブジェクト（L3BaseConfig想定）
-            use_jit: JIT最適化使用フラグ
+            config: 設定オブジェクト
+            use_jit: JIT使用フラグ（None=自動判定）
         """
-        # 設定の初期化
-        if config is None:
-            if CONFIG_AVAILABLE:
-                self.config = L3BaseConfig()
-            else:
-                # フォールバック設定
-                self.config = type('Config', (), {
-                    'window': 10,
-                    'threshold_percentile': 95.0,
-                    'local_window': 5,
-                    'global_window': 30,
-                    'delta_percentile': 95.0,
-                    'local_threshold_percentile': 85.0,
-                    'global_threshold_percentile': 92.5
-                })()
-        else:
-            self.config = config
+        self.config = config or (L3BaseConfig() if CONFIG_AVAILABLE else None)
+        self.use_jit = use_jit if use_jit is not None else JIT_AVAILABLE
         
-        # JIT使用判定
-        if use_jit is None:
-            self.use_jit = JIT_FUNCTIONS_AVAILABLE and getattr(self.config, 'enable_jit', True)
-        else:
-            self.use_jit = use_jit and JIT_FUNCTIONS_AVAILABLE
-        
-        print(f"StructuralTensorExtractor initialized: JIT={self.use_jit}")
-    
-    def extract_features(
-        self, 
-        data: ArrayLike, 
+    def extract(
+        self,
+        data: FloatArray,
         series_name: str = "Series",
         feature_level: str = "standard"
     ) -> StructuralTensorFeatures:
         """
-        構造テンソル特徴量抽出（完全修正版）
+        特徴量抽出のメインメソッド
         
         Args:
-            data: 入力時系列データ（任意形式）
+            data: 入力時系列データ
             series_name: 系列名
-            feature_level: 特徴量レベル ('basic', 'standard', 'comprehensive')
+            feature_level: 特徴量レベル（basic/standard/comprehensive）
             
         Returns:
             StructuralTensorFeatures: 抽出された特徴量
         """
-        start_time = time.time()
+        # データ前処理
+        data = self._preprocess_data(data)
         
-        try:
-            # データ前処理（完全修正版）
-            processed_data = ensure_1d_array(data, f"input data for {series_name}")
-            clean_name = ensure_series_name(series_name) if TYPES_AVAILABLE else str(series_name)
-            
-            # 特徴量抽出実行
-            if self.use_jit and feature_level in ['standard', 'comprehensive']:
-                try:
-                    features = self._extract_with_jit(processed_data, clean_name, feature_level)
-                except Exception as jit_error:
-                    warnings.warn(f"JIT extraction failed: {jit_error}, falling back to Python")
-                    features = self._extract_basic(processed_data, clean_name, feature_level)
-            else:
-                features = self._extract_basic(processed_data, clean_name, feature_level)
-            
-            # 実行時間記録
-            features.extraction_time = time.time() - start_time
-            features.feature_level = feature_level
-            features.jit_optimized = self.use_jit
-            
-            return features
-            
-        except Exception as e:
-            raise StructuralTensorError(f"Feature extraction failed for {series_name}: {e}")
+        # 特徴量レベルに応じた抽出
+        if self.use_jit and feature_level in ["standard", "comprehensive"]:
+            return self._extract_with_jit(data, series_name, feature_level)
+        else:
+            return self._extract_pure_python(data, series_name, feature_level)
+    
+    def _preprocess_data(self, data: FloatArray) -> np.ndarray:
+        """データ前処理"""
+        # NumPy配列に変換
+        if not isinstance(data, np.ndarray):
+            data = np.asarray(data, dtype=np.float64)
+        else:
+            data = data.astype(np.float64)
+        
+        # 1次元化
+        if data.ndim > 1:
+            data = data.flatten()
+        
+        # NaN/Inf処理
+        if np.any(~np.isfinite(data)):
+            warnings.warn("Non-finite values detected. Replacing with interpolation.")
+            data = self._handle_non_finite(data)
+        
+        # 最小長チェック
+        if len(data) < 10:
+            raise FeatureExtractionError("Data length must be at least 10")
+        
+        return data
+    
+    def _handle_non_finite(self, data: np.ndarray) -> np.ndarray:
+        """非有限値の処理"""
+        finite_mask = np.isfinite(data)
+        if np.all(~finite_mask):
+            return np.zeros_like(data)
+        
+        # 線形補間
+        indices = np.arange(len(data))
+        data[~finite_mask] = np.interp(
+            indices[~finite_mask],
+            indices[finite_mask],
+            data[finite_mask]
+        )
+        return data
     
     def _extract_with_jit(
-        self, 
-        data: FloatArray, 
-        series_name: str, 
+        self,
+        data: np.ndarray,
+        series_name: str,
         feature_level: str
     ) -> StructuralTensorFeatures:
-        """JIT最適化特徴量抽出（修正版）"""
-        
-        print(f"Extracting features with JIT optimization for {series_name}")
-        
+        """JIT最適化版特徴量抽出"""
         try:
-            if feature_level == 'comprehensive':
-                # 包括特徴量（階層的解析含む）
-                # 設定値の安全な取得
-                window = getattr(self.config, 'window', 10)
-                if hasattr(self.config, 'base'):
-                    window = getattr(self.config.base, 'window', window)
+            # 設定パラメータ取得
+            window = getattr(self.config, 'window', 10) if self.config else 10
+            percentile = getattr(self.config, 'threshold_percentile', 95.0) if self.config else 95.0
+            
+            if feature_level == "comprehensive":
+                # 包括的特徴量抽出（7特徴量）
+                jit_result = calc_lambda3_features_v2(data, window, percentile)
                 
-                local_window = getattr(self.config, 'local_window', 5)
-                if hasattr(self.config, 'base'):
-                    local_window = getattr(self.config.base, 'local_window', local_window)
-                
-                global_window = getattr(self.config, 'global_window', 30)
-                if hasattr(self.config, 'base'):
-                    global_window = getattr(self.config.base, 'global_window', global_window)
-                
-                delta_percentile = getattr(self.config, 'delta_percentile', 95.0)
-                if hasattr(self.config, 'base'):
-                    delta_percentile = getattr(self.config.base, 'delta_percentile', delta_percentile)
-                
-                local_percentile = getattr(self.config, 'local_threshold_percentile', 85.0)
-                if hasattr(self.config, 'base'):
-                    local_percentile = getattr(self.config.base, 'local_threshold_percentile', local_percentile)
-                
-                global_percentile = getattr(self.config, 'global_threshold_percentile', 92.5)
-                if hasattr(self.config, 'base'):
-                    global_percentile = getattr(self.config.base, 'global_threshold_percentile', global_percentile)
-                
-                features_tuple = extract_lambda3_features_jit(
-                    data,
-                    window=window,
-                    local_window=local_window,
-                    global_window=global_window,
-                    delta_percentile=delta_percentile,
-                    local_percentile=local_percentile,
-                    global_percentile=global_percentile
-                )
-                
-                # 結果の展開と安全性確保
-                if len(features_tuple) >= 7:
-                    delta_pos, delta_neg, rho_t, local_pos, local_neg, global_pos, global_neg = features_tuple[:7]
+                if len(jit_result) >= 9:  # 階層的特徴量を含む
+                    (delta_pos, delta_neg, rho_t, time_trend, local_jump,
+                     local_pos, local_neg, global_pos, global_neg) = jit_result[:9]
                     
                     features = StructuralTensorFeatures(
                         data=data,
                         series_name=series_name,
-                        delta_LambdaC_pos=ensure_1d_array(delta_pos, "delta_pos"),
-                        delta_LambdaC_neg=ensure_1d_array(delta_neg, "delta_neg"),
-                        rho_T=ensure_1d_array(rho_t, "rho_t"),
-                        local_pos=ensure_1d_array(local_pos, "local_pos"),
-                        local_neg=ensure_1d_array(local_neg, "local_neg"),
-                        global_pos=ensure_1d_array(global_pos, "global_pos"),
-                        global_neg=ensure_1d_array(global_neg, "global_neg")
+                        delta_LambdaC_pos=delta_pos,
+                        delta_LambdaC_neg=delta_neg,
+                        rho_T=rho_t,
+                        time_trend=time_trend,
+                        local_jump_detect=local_jump,
+                        local_pos=local_pos,
+                        local_neg=local_neg,
+                        global_pos=global_pos,
+                        global_neg=global_neg,
+                        extraction_method="jit_comprehensive"
                     )
                 else:
-                    raise ValueError("JIT function returned insufficient features")
-                
-            else:
-                # 標準特徴量
-                threshold_percentile = getattr(self.config, 'threshold_percentile', 95.0)
-                if hasattr(self.config, 'base'):
-                    threshold_percentile = getattr(self.config.base, 'threshold_percentile', threshold_percentile)
-                
-                window = getattr(self.config, 'window', 10)
-                if hasattr(self.config, 'base'):
-                    window = getattr(self.config.base, 'window', window)
-                
-                diff, threshold = calculate_diff_and_threshold_fixed(data, threshold_percentile)
-                delta_pos, delta_neg = detect_structural_jumps_fixed(diff, threshold)
-                rho_t = calculate_tension_scalar_fixed(delta_pos, delta_neg, data, window)
+                    # フォールバック
+                    return self._extract_pure_python(data, series_name, feature_level)
+            
+            else:  # standard
+                # 基本特徴量抽出
+                diff, threshold = calculate_diff_and_threshold(data, percentile)
+                delta_pos, delta_neg = detect_jumps(diff, threshold)
+                rho_t = calculate_rho_t(data, window)
                 
                 features = StructuralTensorFeatures(
                     data=data,
                     series_name=series_name,
-                    delta_LambdaC_pos=ensure_1d_array(delta_pos, "delta_pos"),
-                    delta_LambdaC_neg=ensure_1d_array(delta_neg, "delta_neg"),
-                    rho_T=ensure_1d_array(rho_t, "rho_t")
+                    delta_LambdaC_pos=delta_pos,
+                    delta_LambdaC_neg=delta_neg,
+                    rho_T=rho_t,
+                    extraction_method="jit_standard"
                 )
             
             return features
             
         except Exception as e:
-            raise StructuralTensorError(f"JIT feature extraction failed: {e}")
+            warnings.warn(f"JIT extraction failed: {e}. Falling back to pure Python.")
+            return self._extract_pure_python(data, series_name, feature_level)
     
-    def _extract_basic(
-        self, 
-        data: FloatArray, 
-        series_name: str, 
+    def _extract_pure_python(
+        self,
+        data: np.ndarray,
+        series_name: str,
         feature_level: str
     ) -> StructuralTensorFeatures:
-        """基本特徴量抽出（完全修正版）"""
+        """純Python版特徴量抽出"""
+        # 基本特徴量計算
+        diff = np.diff(data, prepend=data[0])
+        threshold = np.percentile(np.abs(diff), 95.0)
         
-        print(f"Extracting features with Pure Python for {series_name}")
+        delta_pos = (diff > threshold).astype(np.float64)
+        delta_neg = (diff < -threshold).astype(np.float64)
         
-        try:
-            # 1. 安全な差分計算
-            diff = safe_diff(data)
-            
-            # 2. 構造変化検出
-            threshold_percentile = getattr(self.config, 'threshold_percentile', 95.0)
-            if hasattr(self.config, 'base') and hasattr(self.config.base, 'threshold_percentile'):
-                threshold_percentile = self.config.base.threshold_percentile
-            
-            threshold = safe_percentile(np.abs(diff), threshold_percentile, exclude_zeros=True)
-            delta_pos = (diff > threshold).astype(np.float64)
-            delta_neg = (diff < -threshold).astype(np.float64)
-            
-            # 3. 張力スカラー計算（修正版）
-            rho_t = self._calculate_tension_scalar_safe(data, delta_pos, delta_neg)
-            
-            # 4. 特徴量オブジェクト作成
-            features = StructuralTensorFeatures(
-                data=data,
-                series_name=series_name,
-                delta_LambdaC_pos=delta_pos,
-                delta_LambdaC_neg=delta_neg,
-                rho_T=rho_t
-            )
-            
-            # 5. 包括レベルの場合は階層解析も実行
-            if feature_level == 'comprehensive':
-                features = self._add_hierarchical_features_safe(features)
-            
-            return features
-            
-        except Exception as e:
-            raise StructuralTensorError(f"Basic feature extraction failed: {e}")
+        # 張力スカラー計算
+        window = 10
+        rho_t = np.zeros(len(data), dtype=np.float64)
+        for i in range(len(data)):
+            start = max(0, i - window)
+            end = i + 1
+            subset = data[start:end]
+            rho_t[i] = np.std(subset) if len(subset) > 1 else 0.0
+        
+        features = StructuralTensorFeatures(
+            data=data,
+            series_name=series_name,
+            delta_LambdaC_pos=delta_pos,
+            delta_LambdaC_neg=delta_neg,
+            rho_T=rho_t,
+            extraction_method="pure_python"
+        )
+        
+        # 階層的特徴量の追加（comprehensiveの場合）
+        if feature_level == "comprehensive":
+            self._add_hierarchical_features_python(features)
+        
+        return features
     
-    def _calculate_tension_scalar_safe(self, data: np.ndarray, 
-                                     delta_pos: np.ndarray, delta_neg: np.ndarray) -> np.ndarray:
-        """安全な張力スカラー計算"""
+    def _add_hierarchical_features_python(self, features: StructuralTensorFeatures):
+        """純Python版階層的特徴量追加"""
+        data = features.data
         n = len(data)
-        rho_t = np.zeros(n, dtype=np.float64)
-        window = getattr(self.config, 'window', 10)
-        if hasattr(self.config, 'base') and hasattr(self.config.base, 'window'):
-            window = self.config.base.window
+        
+        # 簡易的な階層的検出
+        local_window = 5
+        global_window = 30
+        
+        diff = np.diff(data, prepend=data[0])
+        
+        # ローカル検出
+        local_pos = np.zeros(n, dtype=np.float64)
+        local_neg = np.zeros(n, dtype=np.float64)
         
         for i in range(n):
-            # 窓範囲計算
-            start = max(0, i - window // 2)
-            end = min(n, i + window // 2 + 1)
+            local_start = max(0, i - local_window)
+            local_end = min(n, i + local_window + 1)
+            local_subset = np.abs(diff[local_start:local_end])
             
-            # 窓内データ取得
-            window_data = data[start:end]
-            
-            # 張力計算
-            if len(window_data) > 1:
-                # データ変動
-                volatility = safe_std(window_data)
-                
-                # 構造変化強度
-                pos_intensity = np.sum(delta_pos[start:end])
-                neg_intensity = np.sum(delta_neg[start:end])
-                total_intensity = pos_intensity + neg_intensity
-                asymmetry = abs(pos_intensity - neg_intensity)
-                
-                # 張力 = 変動 × (総強度 + 非対称性)
-                rho_t[i] = volatility * (total_intensity + asymmetry)
-            else:
-                rho_t[i] = 0.0
+            if len(local_subset) > 0:
+                local_threshold = np.percentile(local_subset, 90.0)
+                if diff[i] > local_threshold:
+                    local_pos[i] = 1.0
+                elif diff[i] < -local_threshold:
+                    local_neg[i] = 1.0
         
-        return rho_t
-    
-    def _add_hierarchical_features_safe(self, features: StructuralTensorFeatures) -> StructuralTensorFeatures:
-        """階層的特徴量の安全な追加"""
+        # グローバル検出
+        global_threshold = np.percentile(np.abs(diff), 95.0)
+        global_pos = (diff > global_threshold).astype(np.float64)
+        global_neg = (diff < -global_threshold).astype(np.float64)
         
-        try:
-            data = features.data
-            n = len(data)
-            
-            # 窓サイズ設定
-            local_window = getattr(self.config, 'local_window', 5)
-            if hasattr(self.config, 'base'):
-                local_window = getattr(self.config.base, 'local_window', local_window)
-            
-            global_window = getattr(self.config, 'global_window', 30)
-            if hasattr(self.config, 'base'):
-                global_window = getattr(self.config.base, 'global_window', global_window)
-            
-            # 差分計算
-            diff = safe_diff(data)
-            
-            # 局所構造変化検出
-            local_pos = np.zeros(n, dtype=np.float64)
-            local_neg = np.zeros(n, dtype=np.float64)
-            
-            for i in range(n):
-                start = max(0, i - local_window)
-                end = min(n, i + local_window + 1)
-                
-                if end > start + 1:  # 最低2点必要
-                    local_threshold = safe_percentile(np.abs(diff[start:end]), 90.0, exclude_zeros=True)
-                    
-                    if diff[i] > local_threshold:
-                        local_pos[i] = 1.0
-                    elif diff[i] < -local_threshold:
-                        local_neg[i] = 1.0
-            
-            # 大域構造変化検出
-            global_threshold = safe_percentile(np.abs(diff), 95.0, exclude_zeros=True)
-            global_pos = (diff > global_threshold).astype(np.float64)
-            global_neg = (diff < -global_threshold).astype(np.float64)
-            
-            # 特徴量に追加
-            features.local_pos = local_pos
-            features.local_neg = local_neg
-            features.global_pos = global_pos
-            features.global_neg = global_neg
-            
-            return features
-            
-        except Exception as e:
-            warnings.warn(f"Hierarchical feature extraction failed: {e}")
-            return features  # 基本特徴量のみ返す
+        # 特徴量を更新
+        features.local_pos = local_pos
+        features.local_neg = local_neg
+        features.global_pos = global_pos
+        features.global_neg = global_neg
 
 # ==========================================================
-# 便利関数（完全修正版）
+# CONVENIENCE FUNCTIONS - 便利関数
 # ==========================================================
 
 def extract_lambda3_features(
-    data: ArrayLike,
-    config: Optional[Any] = None,
+    data: FloatArray,
     series_name: str = "Series",
     feature_level: str = "standard",
+    config: Optional[Any] = None,
     use_jit: Optional[bool] = None
 ) -> StructuralTensorFeatures:
     """
-    Lambda³特徴量抽出の便利関数（完全修正版）
+    Lambda³特徴量抽出の便利関数
     
     Args:
-        data: 入力時系列データ（任意形式）
-        config: 設定オブジェクト
+        data: 入力時系列データ
         series_name: 系列名
-        feature_level: 特徴量レベル
-        use_jit: JIT最適化使用フラグ
+        feature_level: 特徴量レベル（basic/standard/comprehensive）
+        config: 設定オブジェクト
+        use_jit: JIT使用フラグ
         
     Returns:
         StructuralTensorFeatures: 抽出された特徴量
     """
     extractor = StructuralTensorExtractor(config=config, use_jit=use_jit)
-    return extractor.extract_features(data, series_name, feature_level)
+    return extractor.extract(data, series_name, feature_level)
 
-def create_sample_structural_tensor(
-    n_points: int = 200,
-    series_name: str = "Sample",
-    add_jumps: bool = True,
-    random_seed: int = 42
-) -> StructuralTensorFeatures:
-    """
-    サンプル構造テンソル特徴量生成（修正版）
-    
-    テスト・デモ用のサンプルデータと特徴量を生成。
-    """
-    np.random.seed(random_seed)
-    
-    # 基本時系列生成
-    trend = np.cumsum(np.random.randn(n_points) * 0.02)
-    
-    # 構造変化ジャンプ追加
-    if add_jumps:
-        jump_positions = np.random.choice(n_points, size=max(1, n_points // 30), replace=False)
-        jumps = np.zeros(n_points)
-        jumps[jump_positions] = np.random.normal(0, 1.0, len(jump_positions))
-        trend += np.cumsum(jumps)
-    
-    # 特徴量抽出
-    return extract_lambda3_features(trend, series_name=series_name, feature_level='comprehensive')
+def extract_features(data: FloatArray, **kwargs) -> StructuralTensorFeatures:
+    """extract_lambda3_featuresのエイリアス"""
+    return extract_lambda3_features(data, **kwargs)
 
 # ==========================================================
-# モジュール情報
-# ==========================================================
-
-__all__ = [
-    'StructuralTensorFeatures',
-    'StructuralTensorExtractor', 
-    'extract_lambda3_features',
-    'create_sample_structural_tensor',
-    'StructuralTensorError',
-    'ensure_1d_array',
-    'safe_diff',
-    'safe_percentile',
-    'safe_std'
-]
-
-# ==========================================================
-# テスト関数（修正版）
+# VALIDATION & TESTING - 検証・テスト
 # ==========================================================
 
 def test_structural_tensor_implementation():
-    """構造テンソル実装のテスト（修正版）"""
-    print("🧪 Testing StructuralTensorFeatures Implementation (Fixed Version)")
+    """構造テンソル実装のテスト"""
+    print("🧪 Testing StructuralTensorFeatures Implementation (Complete)")
     print("=" * 60)
     
     try:
-        # 各種データ形式のテスト
+        # テストケース
         test_cases = [
-            ("1D array", np.cumsum(np.random.randn(100) * 0.1)),
-            ("2D array (N,1)", np.cumsum(np.random.randn(100, 1) * 0.1)),
-            ("2D array (1,N)", np.cumsum(np.random.randn(1, 100) * 0.1)),
-            ("List", [1.0, 2.0, 3.0, 2.5, 4.0, 3.8, 5.2] * 15),
-            ("List with NaN", [1.0, 2.0, np.nan, 2.5, 4.0, 3.8, float('inf')] * 15),
+            ("Random Walk", np.cumsum(np.random.randn(100) * 0.1)),
+            ("Sine Wave", np.sin(np.linspace(0, 4*np.pi, 100))),
+            ("Step Function", np.concatenate([np.ones(50), np.ones(50)*2])),
+            ("With NaN", np.concatenate([np.ones(30), [np.nan]*10, np.ones(60)]))
         ]
         
         for test_name, test_data in test_cases:
             print(f"\n📊 Testing {test_name}...")
             
-            try:
-                features = extract_lambda3_features(test_data, series_name=test_name, feature_level="basic")
-                print(f"✅ {test_name} extraction successful: {features}")
-                
-                # 整合性検証
-                valid, issues = features.validate_consistency() if hasattr(features, 'validate_consistency') else (True, [])
-                print(f"✅ Consistency check: {'OK' if valid else 'NG'}")
-                if issues:
-                    for issue in issues[:3]:  # 最初の3個のみ表示
-                        print(f"   Warning: {issue}")
-                
-                # サマリー取得
-                summary = features.get_structural_summary()
-                print(f"✅ Summary: changes={summary['total_structural_changes']}, quality={summary['data_quality_score']:.3f}")
-                
-            except Exception as e:
-                print(f"❌ {test_name} failed: {e}")
+            # 基本特徴量抽出
+            features_basic = extract_lambda3_features(
+                test_data, 
+                series_name=test_name, 
+                feature_level="basic"
+            )
+            print(f"✅ Basic extraction: {features_basic.extraction_method}")
+            
+            # 標準特徴量抽出
+            features_std = extract_lambda3_features(
+                test_data, 
+                series_name=test_name, 
+                feature_level="standard"
+            )
+            print(f"✅ Standard extraction: {features_std.extraction_method}")
+            
+            # 包括的特徴量抽出
+            features_comp = extract_lambda3_features(
+                test_data, 
+                series_name=test_name, 
+                feature_level="comprehensive"
+            )
+            print(f"✅ Comprehensive extraction: {features_comp.extraction_method}")
+            
+            # サマリー表示
+            summary = features_comp.get_structural_summary()
+            print(f"   Total changes: {summary['total_structural_changes']}")
+            print(f"   Mean tension: {summary['mean_tension']:.4f}")
+            print(f"   Quality score: {summary['data_quality_score']:.3f}")
+            
+            if 'hierarchical_features' in summary:
+                hier = summary['hierarchical_features']
+                print(f"   Hierarchical - Local: {hier['local_events']}, Global: {hier['global_events']}")
+            
+            # 整合性検証
+            valid, issues = features_comp.validate_consistency()
+            if valid:
+                print("✅ Consistency check passed")
+            else:
+                print(f"⚠️  Consistency issues: {issues[:3]}")
         
-        print("\n🎯 Fixed StructuralTensorFeatures test completed successfully!")
+        print("\n✅ All tests completed successfully!")
         return True
         
     except Exception as e:
@@ -822,5 +603,28 @@ def test_structural_tensor_implementation():
         traceback.print_exc()
         return False
 
+# ==========================================================
+# MODULE EXPORTS
+# ==========================================================
+
+__all__ = [
+    # クラス
+    'StructuralTensorFeatures',
+    'StructuralTensorExtractor',
+    'StructuralTensorError',
+    'FeatureExtractionError',
+    
+    # 関数
+    'extract_lambda3_features',
+    'extract_features',
+    
+    # テスト
+    'test_structural_tensor_implementation',
+    
+    # プロトコル
+    'StructuralTensorProtocol'
+]
+
 if __name__ == "__main__":
+    # 自動テスト実行
     test_structural_tensor_implementation()
