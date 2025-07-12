@@ -229,7 +229,7 @@ class StructuralTensorExtractor:
             metadata={'extraction_level': 'basic'}
         )
     
-    def _extract_hierarchical_features(
+   def _extract_hierarchical_features(
         self,
         data: np.ndarray,
         series_name: str
@@ -239,7 +239,7 @@ class StructuralTensorExtractor:
         basic_features = self._extract_basic_features(data, series_name)
         
         if self.jit_available and self.config:
-            # 階層的構造変化検出
+            # 階層的構造変化検出（paste.txt準拠）
             local_pos, local_neg, global_pos, global_neg = detect_local_global_jumps(
                 data,
                 local_window=self.config.local_window,
@@ -254,11 +254,11 @@ class StructuralTensorExtractor:
                     local_pos, local_neg, global_pos, global_neg
                 )
             
-            # 特徴量更新
-            basic_features.local_pos = local_pos
-            basic_features.local_neg = local_neg
-            basic_features.global_pos = global_pos
-            basic_features.global_neg = global_neg
+            # 特徴量更新（全てfloat64保証）
+            basic_features.local_pos = local_pos.astype(np.float64)
+            basic_features.local_neg = local_neg.astype(np.float64)
+            basic_features.global_pos = global_pos.astype(np.float64)
+            basic_features.global_neg = global_neg.astype(np.float64)
             basic_features.pure_local_pos = pure_local_pos
             basic_features.pure_local_neg = pure_local_neg
             basic_features.pure_global_pos = pure_global_pos
