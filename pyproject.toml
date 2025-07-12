@@ -23,7 +23,7 @@ description = "Lambda³ Theory: Advanced Financial Analysis with Structural Tens
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Mamichi Iizumi", email = "m.iizumi@miosync.email"},
+    {name = "Masamichi Iizumi", email = "m.iizumi@miosync.email"},
 ]
 maintainers = [
     {name = "Miosync Research Team", email = "info@miosync.email"},
@@ -193,11 +193,11 @@ lambda3-benchmark = "lambda3.cli:benchmark_command"
 
 [tool.setuptools]
 # パッケージ自動発見（修正版）
-packages = ["lambda3"]
+# packages = ["lambda3"] # 自動発見を優先するため、明示的なpackages指定を削除
 include-package-data = true
 zip-safe = false
 
-# 明示的パッケージ指定（重複除去 - この1箇所のみ）
+# パッケージ自動発見設定
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lambda3*"]
@@ -213,7 +213,7 @@ lambda3 = [
     "*.json",
     "data/**/*",
     "config/**/*",
-    "tests/**/*",
+    # "tests/**/*", # テストファイルは配布物から除外
 ]
 
 # ==========================================================
@@ -246,7 +246,7 @@ extend-exclude = '''
   | dist
   | migrations
   
-  # Lambda³専用除外
+# Lambda³専用除外
   | lambda3/_version\\.py
   | docs/
   | examples/legacy/
