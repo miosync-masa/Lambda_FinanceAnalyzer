@@ -1,5 +1,5 @@
 # ================================================================
-# lambda3/utils/helpers.py
+# lambda3/utils/helpers.py - 修正版
 # ================================================================
 
 """
@@ -12,6 +12,56 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any, Union
 import warnings
+
+# ================================================================
+# BASE HELPERS FROM __init__.py
+# ================================================================
+
+# 数値計算
+def safe_divide(numerator: Union[float, np.ndarray], 
+                denominator: Union[float, np.ndarray], 
+                default: float = 0.0) -> Union[float, np.ndarray]:
+    """安全な除算（ゼロ除算回避）"""
+    if isinstance(denominator, np.ndarray):
+        result = np.full_like(denominator, default, dtype=float)
+        mask = np.abs(denominator) > 1e-12
+        result[mask] = numerator[mask] / denominator[mask] if isinstance(numerator, np.ndarray) else numerator / denominator[mask]
+        return result
+    else:
+        return numerator / denominator if abs(denominator) > 1e-12 else default
+
+def robust_normalize(data: np.ndarray, 
+                    method: str = 'zscore',
+                    axis: Optional[int] = None) -> np.ndarray:
+    """ロバスト正規化"""
+    if method == 'zscore':
+        mean = np.mean(data, axis=axis, keepdims=True)
+        std = np.std(data, axis=axis, keepdims=True)
+        return safe_divide(data - mean, std)
+    
+    elif method == 'minmax':
+        min_val = np.min(data, axis=axis, keepdims=True)
+        max_val = np.max(data, axis=axis, keepdims=True)
+        return safe_divide(data - min_val, max_val - min_val)
+    
+    elif method == 'robust':
+        median = np.median(data, axis=axis, keepdims=True)
+        mad = np.median(np.abs(data - median), axis=axis, keepdims=True)
+        return safe_divide(data - median, mad * 1.4826)
+    
+    elif method == 'quantile':
+        q25 = np.percentile(data, 25, axis=axis, keepdims=True)
+        q75 = np.percentile(data, 75, axis=axis, keepdims=True)
+        median = np.median(data, axis=axis, keepdims=True)
+        iqr = q75 - q25
+        return safe_divide(data - median, iqr)
+    
+    else:
+        raise ValueError(f"Unknown normalization method: {method}")
+
+# ================================================================
+# EXTENDED HELPERS
+# ================================================================
 
 def quick_lambda3_analysis(data: Union[np.ndarray, Dict[str, np.ndarray]], 
                           print_summary: bool = True) -> Dict[str, Any]:
@@ -138,9 +188,16 @@ def create_lambda3_report_template() -> str:
     
     return template
 
-# エクスポート追加
-__all__.extend([
+# ================================================================
+# EXPORTS - 正しく初期化
+# ================================================================
+
+__all__ = [
+    # 基本ヘルパー
+    'safe_divide',
+    'robust_normalize',
+    # 拡張ヘルパー
     'quick_lambda3_analysis',
     'estimate_analysis_time', 
     'create_lambda3_report_template'
-])
+]
