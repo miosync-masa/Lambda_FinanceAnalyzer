@@ -507,23 +507,30 @@ class PairwiseAnalyzer:
         features_a: StructuralTensorProtocol,
         features_b: StructuralTensorProtocol
     ) -> Dict[str, Any]:
-        """同期性計算"""
+        """同期性計算（修正版）"""
         
-        # 基本同期強度
+        # 基本同期強度（差分ベースに変更）
         if len(data_a) > 1 and len(data_b) > 1:
-            correlation = np.corrcoef(data_a, data_b)[0, 1]
-            sync_strength = abs(correlation) if not np.isnan(correlation) else 0.0
+            # 構造テンソル差分での相関計算（トレンド除去）
+            diff_a = np.diff(data_a)
+            diff_b = np.diff(data_b)
+            
+            if len(diff_a) > 0 and len(diff_b) > 0:
+                correlation = np.corrcoef(diff_a, diff_b)[0, 1]
+                sync_strength = abs(correlation) if not np.isnan(correlation) else 0.0
+            else:
+                sync_strength = 0.0
         else:
             sync_strength = 0.0
         
-        # 構造変化同期
+        # 構造変化同期（これは既に正しい）
         structure_sync = self._calculate_structure_synchronization(features_a, features_b)
         
-        # 同期プロファイル
+        # 同期プロファイル（これも差分ベースに）
         if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            sync_profile = self._calculate_sync_profile_jit(data_a, data_b)
+            sync_profile = self._calculate_sync_profile_jit(diff_a, diff_b)
         else:
-            sync_profile = self._calculate_sync_profile_python(data_a, data_b)
+            sync_profile = self._calculate_sync_profile_python(diff_a, diff_b)
         
         return {
             'sync_strength': sync_strength,
