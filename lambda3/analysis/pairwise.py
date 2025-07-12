@@ -1,15 +1,10 @@
 # ==========================================================
-# lambda3/analysis/pairwise.py (JIT Compatible Version)
+# lambda3/analysis/pairwise.py (完全版)
 # Pairwise Interaction Analysis for Lambda³ Theory
-#
-# Author: Mamichi Iizumi (Miosync, Inc.)
-# License: MIT
-# 
-# 修正点: JIT最適化関数との完全互換性確保
 # ==========================================================
 
 """
-Lambda³理論ペアワイズ相互作用解析モジュール（JIT互換版）
+Lambda³理論ペアワイズ相互作用解析モジュール（完全版）
 
 構造テンソル(Λ)系列間の非対称相互作用を定量化し、
 ∆ΛC pulsationsの相互響応パターンを解析。
@@ -20,18 +15,17 @@ Lambda³理論ペアワイズ相互作用解析モジュール（JIT互換版）
 - 因果構造: 時間非依存の構造空間因果関係
 - 張力伝播: ρT張力スカラーの系列間伝播
 
-JIT最適化対応:
-- 修正版JIT関数による高速同期計算
-- 数値安定性の向上
-- メモリ効率の最適化
-- 大規模ペアワイズ分析の高速化
+Author: Mamichi Iizumi (Miosync, Inc.)
+License: MIT
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any, Union
-from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional, Any, Union, TYPE_CHECKING
+from dataclasses import dataclass, field
 import warnings
+import time
 
+# ベイズ分析（オプション）
 try:
     import pymc as pm
     import arviz as az
@@ -40,8 +34,49 @@ except ImportError:
     BAYESIAN_AVAILABLE = False
     warnings.warn("PyMC not available. Bayesian analysis will be disabled.")
 
-from ..core.config import L3BaseConfig, L3PairwiseConfig, L3BayesianConfig
-from ..core.structural_tensor import StructuralTensorFeatures
+# 型定義のインポート（循環回避）
+try:
+    from ..core.types import (
+        StructuralTensorProtocol,
+        PairwiseResultProtocol,
+        ConfigProtocol,
+        FloatArray,
+        ArrayLike,
+        Lambda3Error,
+        ensure_float_array,
+        is_structural_tensor_compatible
+    )
+    TYPES_AVAILABLE = True
+except ImportError as e:
+    TYPES_AVAILABLE = False
+    warnings.warn(f"Types module not available: {e}")
+    # フォールバック
+    StructuralTensorProtocol = Any
+    PairwiseResultProtocol = Any
+    Lambda3Error = Exception
+
+# 設定のインポート
+try:
+    from ..core.config import L3BaseConfig, L3PairwiseConfig, L3BayesianConfig
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    # ダミー設定
+    class L3BaseConfig:
+        def __init__(self):
+            self.window = 10
+            self.threshold_percentile = 95.0
+
+# 構造テンソル（条件付きインポート）
+if TYPE_CHECKING:
+    from ..core.structural_tensor import StructuralTensorFeatures
+else:
+    try:
+        from ..core.structural_tensor import StructuralTensorFeatures
+        STRUCTURAL_TENSOR_AVAILABLE = True
+    except ImportError:
+        STRUCTURAL_TENSOR_AVAILABLE = False
+        warnings.warn("StructuralTensorFeatures not available - using Protocol")
 
 # JIT最適化関数のインポート（修正版）
 try:
@@ -61,8 +96,8 @@ try:
     calculate_sync_rate_at_lag = calculate_sync_rate_at_lag_fixed
     
 except ImportError:
-    warnings.warn("JIT functions not available. Using fallback implementations.")
     JIT_FUNCTIONS_AVAILABLE = False
+    warnings.warn("JIT functions not available. Using fallback implementations.")
     
     # フォールバック実装
     def calculate_sync_profile_fixed(series_a, series_b, lag_window):
@@ -70,15 +105,18 @@ except ImportError:
         sync_values = np.zeros(len(lags))
         for i, lag in enumerate(lags):
             if lag == 0:
-                sync_values[i] = np.corrcoef(series_a, series_b)[0, 1]
-            elif lag > 0:
-                if lag < len(series_a):
+                if len(series_a) > 1 and len(series_b) > 1:
+                    sync_values[i] = np.corrcoef(series_a, series_b)[0, 1]
+            elif lag > 0 and lag < len(series_a):
+                if len(series_a[:-lag]) > 1 and len(series_b[lag:]) > 1:
                     sync_values[i] = np.corrcoef(series_a[:-lag], series_b[lag:])[0, 1]
             else:
                 abs_lag = -lag
-                if abs_lag < len(series_b):
+                if abs_lag < len(series_b) and len(series_a[abs_lag:]) > 1:
                     sync_values[i] = np.corrcoef(series_a[abs_lag:], series_b[:-abs_lag])[0, 1]
         
+        # NaN値を0に置換
+        sync_values = np.nan_to_num(sync_values, nan=0.0)
         max_idx = np.argmax(np.abs(sync_values))
         return lags, sync_values, sync_values[max_idx], lags[max_idx]
     
@@ -90,1114 +128,878 @@ except ImportError:
     def safe_divide_fixed(num, den, default=0.0):
         return num / den if abs(den) > 1e-8 else default
     
-    calculate_sync_profile = calculate_sync_profile_fixed
+    def detect_phase_coupling_fixed(series_a, series_b):
+        if len(series_a) > 10 and len(series_b) > 10:
+            phase_a = np.diff(series_a)
+            phase_b = np.diff(series_b)
+            min_len = min(len(phase_a), len(phase_b))
+            phase_a = phase_a[:min_len]
+            phase_b = phase_b[:min_len]
+            if min_len > 1:
+                coupling = abs(np.corrcoef(phase_a, phase_b)[0, 1])
+                if np.isnan(coupling):
+                    coupling = 0.0
+                cross_corr = np.correlate(phase_a, phase_b, mode='full')
+                lag = np.argmax(cross_corr) - len(phase_a) + 1
+                return coupling, lag
+        return 0.0, 0.0
 
 # ==========================================================
-# PAIRWISE INTERACTION RESULTS（完全保持）
+# ペアワイズ分析結果データクラス（Protocol準拠）
 # ==========================================================
 
 @dataclass
 class PairwiseInteractionResults:
     """
-    ペアワイズ相互作用解析結果データクラス
+    ペアワイズ相互作用分析結果（完全版）
     
-    Lambda³理論における二系列間の構造テンソル相互作用を統合管理。
-    非対称係数、因果パターン、同期特性を包含。
+    PairwiseResultProtocolに準拠し、循環インポートを回避した
+    ペアワイズ分析結果の具体実装。
     """
     
-    series_names: Tuple[str, str]
+    # 系列識別子
+    name_a: str = "Series_A"
+    name_b: str = "Series_B"
+    analysis_timestamp: str = field(default_factory=lambda: time.strftime("%Y%m%d_%H%M%S"))
     
-    # ベイズ推定結果
-    traces: Dict[str, Any] = None
-    models: Dict[str, Any] = None
+    # 同期性指標
+    synchronization_strength: float = 0.0      # 同期強度
+    structure_synchronization: float = 0.0     # 構造変化同期
     
-    # 相互作用係数
-    interaction_coefficients: Dict[str, Dict[str, float]] = None
+    # 因果性指標
+    causality_a_to_b: float = 0.0             # A→B因果強度
+    causality_b_to_a: float = 0.0             # B→A因果強度
+    asymmetry_index: float = 0.0              # 非対称性指標
     
-    # 非対称性メトリクス
-    asymmetry_metrics: Dict[str, float] = None
+    # データ品質
+    data_overlap_length: int = 0               # データ重複長
+    correlation_quality: float = 0.0          # 相関品質
     
-    # 因果パターン
-    causality_patterns: Dict[str, Dict[int, float]] = None
+    # 詳細分析結果
+    synchronization_profile: Dict[str, float] = field(default_factory=dict)
+    interaction_coefficients: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    phase_coupling: Dict[str, float] = field(default_factory=dict)
     
-    # 同期特性
-    synchronization_profile: Dict[str, Any] = None
+    # メタデータ
+    analysis_method: str = "standard"          # 分析手法
+    bayesian_trace: Optional[Any] = None       # ベイズトレース
+    processing_time: float = 0.0               # 処理時間
     
-    # 予測性能
-    prediction_metrics: Dict[str, float] = None
+    # 拡張メトリクス
+    asymmetry_metrics: Dict[str, float] = field(default_factory=dict)
+    causality_patterns: Dict[str, Dict[int, float]] = field(default_factory=dict)
+    prediction_metrics: Dict[str, float] = field(default_factory=dict)
+    interaction_quality: Dict[str, float] = field(default_factory=dict)
     
-    # 相互作用品質
-    interaction_quality: Dict[str, float] = None
+    def get_interaction_summary(self) -> Dict[str, float]:
+        """相互作用サマリー取得"""
+        return {
+            'synchronization': self.synchronization_strength,
+            'asymmetry': self.asymmetry_index,
+            'causality_a_to_b': self.causality_a_to_b,
+            'causality_b_to_a': self.causality_b_to_a,
+            'quality': self.correlation_quality
+        }
     
-    def __post_init__(self):
-        """初期化後処理"""
-        if self.traces is None:
-            self.traces = {}
-        if self.models is None:
-            self.models = {}
-        if self.interaction_coefficients is None:
-            self.interaction_coefficients = {}
-        if self.asymmetry_metrics is None:
-            self.asymmetry_metrics = {}
-        if self.causality_patterns is None:
-            self.causality_patterns = {}
-        if self.synchronization_profile is None:
-            self.synchronization_profile = {}
-        if self.prediction_metrics is None:
-            self.prediction_metrics = {}
-        if self.interaction_quality is None:
-            self.interaction_quality = {}
-    
-    def get_interaction_strength(self, direction: str) -> float:
-        """相互作用強度取得"""
-        if direction in self.interaction_coefficients:
-            coeffs = self.interaction_coefficients[direction]
-            return sum(abs(v) for v in coeffs.values() if isinstance(v, (int, float)))
-        return 0.0
-    
-    def get_asymmetry_score(self) -> float:
-        """非対称性総合スコア取得"""
-        return self.asymmetry_metrics.get('total_asymmetry', 0.0)
-    
-    def get_dominant_direction(self) -> Tuple[str, float]:
-        """優勢方向と強度を取得"""
-        name_a, name_b = self.series_names
-        strength_a_to_b = self.get_interaction_strength(f'{name_a}_to_{name_b}')
-        strength_b_to_a = self.get_interaction_strength(f'{name_b}_to_{name_a}')
-        
-        if strength_a_to_b > strength_b_to_a:
-            return f'{name_a}_to_{name_b}', strength_a_to_b
+    def get_dominant_direction(self) -> str:
+        """優勢方向判定"""
+        if self.causality_a_to_b > self.causality_b_to_a * 1.2:
+            return 'a_to_b'
+        elif self.causality_b_to_a > self.causality_a_to_b * 1.2:
+            return 'b_to_a'
         else:
-            return f'{name_b}_to_{name_a}', strength_b_to_a
+            return 'symmetric'
+    
+    def get_sync_strength(self) -> float:
+        """同期強度取得（互換性）"""
+        return self.synchronization_strength
+    
+    def get_asymmetry_strength(self) -> float:
+        """非対称性強度取得（互換性）"""
+        return self.asymmetry_index
     
     def calculate_bidirectional_coupling(self) -> float:
         """双方向結合強度計算"""
-        name_a, name_b = self.series_names
-        strength_a_to_b = self.get_interaction_strength(f'{name_a}_to_{name_b}')
-        strength_b_to_a = self.get_interaction_strength(f'{name_b}_to_{name_a}')
-        return (strength_a_to_b + strength_b_to_a) / 2
+        return (self.causality_a_to_b + self.causality_b_to_a) / 2
+    
+    def get_asymmetry_score(self) -> float:
+        """非対称性総合スコア取得"""
+        return self.asymmetry_metrics.get('total_asymmetry', self.asymmetry_index)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式変換"""
+        return {
+            'name_a': self.name_a,
+            'name_b': self.name_b,
+            'analysis_timestamp': self.analysis_timestamp,
+            'synchronization_strength': self.synchronization_strength,
+            'structure_synchronization': self.structure_synchronization,
+            'causality_a_to_b': self.causality_a_to_b,
+            'causality_b_to_a': self.causality_b_to_a,
+            'asymmetry_index': self.asymmetry_index,
+            'data_overlap_length': self.data_overlap_length,
+            'correlation_quality': self.correlation_quality,
+            'dominant_direction': self.get_dominant_direction(),
+            'analysis_method': self.analysis_method,
+            'processing_time': self.processing_time,
+            'bidirectional_coupling': self.calculate_bidirectional_coupling()
+        }
 
 # ==========================================================
-# PAIRWISE ANALYZER（JIT最適化版）
+# ペアワイズ分析器クラス（完全版）
 # ==========================================================
 
 class PairwiseAnalyzer:
     """
-    ペアワイズ相互作用解析器（JIT最適化版）
+    Lambda³ペアワイズ相互作用分析器（完全版）
     
-    Lambda³理論に基づく二系列間の構造テンソル相互作用分析。
-    非対称ベイズモデリング、因果関係検出、同期解析を統合実行。
-    
-    JIT最適化:
-    - 修正版JIT関数による高速同期計算
-    - 大規模相互作用行列の効率的処理
-    - 数値安定性の向上
+    Protocol準拠による型安全性を確保し、循環インポートを回避した
+    ペアワイズ相互作用分析のメインエンジン。
     """
     
-    def __init__(self, 
-                 config: Optional[Union[L3PairwiseConfig, L3BaseConfig]] = None,
-                 bayesian_config: Optional[L3BayesianConfig] = None):
+    def __init__(self, config: Optional[Any] = None, use_jit: Optional[bool] = None):
         """
-        初期化
-        
         Args:
-            config: ペアワイズ解析設定
-            bayesian_config: ベイズ推定設定
+            config: 設定オブジェクト
+            use_jit: JIT最適化使用フラグ
         """
+        # 設定の初期化
         if config is None:
-            self.config = L3PairwiseConfig()
-        elif isinstance(config, L3BaseConfig) and not isinstance(config, L3PairwiseConfig):
-            # L3BaseConfigからペアワイズ設定を生成
-            self.config = L3PairwiseConfig()
-            # 基底設定をコピー
-            for field_name in L3BaseConfig.__dataclass_fields__:
-                if hasattr(config, field_name):
-                    setattr(self.config, field_name, getattr(config, field_name))
+            if CONFIG_AVAILABLE:
+                self.config = L3BaseConfig()
+            else:
+                # フォールバック設定
+                self.config = type('Config', (), {
+                    'window': 10,
+                    'threshold_percentile': 95.0,
+                    'lag_window': 10,
+                    'sync_threshold': 0.3
+                })()
         else:
             self.config = config
         
-        self.bayesian_config = bayesian_config or L3BayesianConfig()
-        self.analysis_history = []
-        
-        # JIT最適化設定確認
-        self.use_jit = JIT_FUNCTIONS_AVAILABLE
-        if hasattr(self.config, 'jit_config'):
-            self.use_jit = self.use_jit and self.config.jit_config.enable_jit
-        
-        if self.use_jit:
-            print("🚀 PairwiseAnalyzer: JIT最適化有効")
+        # JIT使用判定
+        if use_jit is None:
+            self.use_jit = JIT_FUNCTIONS_AVAILABLE and getattr(self.config, 'enable_jit', True)
         else:
-            print("⚠️  PairwiseAnalyzer: JIT最適化無効 - フォールバック実装使用")
+            self.use_jit = use_jit and JIT_FUNCTIONS_AVAILABLE
+        
+        print(f"PairwiseAnalyzer initialized: JIT={self.use_jit}")
     
     def analyze_asymmetric_interaction(
         self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures,
-        use_bayesian: bool = True
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol,
+        use_bayesian: bool = False
     ) -> PairwiseInteractionResults:
         """
-        非対称相互作用分析（JIT最適化版）
-        
-        Lambda³理論: 構造テンソル系列間の非対称相互作用を定量化
-        A→B と B→A の方向別影響度をベイズ推定により解析
+        非対称相互作用分析実行
         
         Args:
-            features_a, features_b: 構造テンソル特徴量
-            use_bayesian: ベイズ推定使用フラグ
+            features_a: 系列Aの構造テンソル特徴量
+            features_b: 系列Bの構造テンソル特徴量
+            use_bayesian: ベイズ分析使用フラグ
             
         Returns:
-            PairwiseInteractionResults: ペアワイズ相互作用結果
+            PairwiseInteractionResults: ペアワイズ分析結果
         """
-        series_names = (features_a.series_name, features_b.series_name)
-        print(f"\n{'='*60}")
-        print(f"ASYMMETRIC PAIRWISE ANALYSIS: {series_names[0]} ⇄ {series_names[1]}")
-        print(f"JIT最適化: {'有効' if self.use_jit else '無効'}")
-        print(f"{'='*60}")
+        start_time = time.time()
         
-        # データ長の統一（JIT最適化考慮）
-        min_length = min(len(features_a.data), len(features_b.data))
-        features_a = self._truncate_features_optimized(features_a, min_length)
-        features_b = self._truncate_features_optimized(features_b, min_length)
+        # 入力検証
+        self._validate_inputs(features_a, features_b)
         
-        print(f"データ長統一: {min_length} points")
+        # データ取得
+        data_a, name_a = self._extract_data_from_features(features_a)
+        data_b, name_b = self._extract_data_from_features(features_b)
         
-        # 結果オブジェクト初期化
-        results = PairwiseInteractionResults(series_names=series_names)
+        print(f"Analyzing pairwise interaction: {name_a} ↔ {name_b}")
         
-        # 同期プロファイル計算（JIT最適化）
-        sync_profile = self._calculate_synchronization_profile_optimized(features_a, features_b)
-        results.synchronization_profile = sync_profile
-        
-        print(f"同期解析完了:")
-        print(f"  最大同期率: {sync_profile.get('max_sync', 0):.4f}")
-        print(f"  最適遅延: {sync_profile.get('optimal_lag', 0)}")
-        
-        # ベイズ非対称相互作用分析
-        if use_bayesian and BAYESIAN_AVAILABLE:
-            try:
-                bayesian_results = self._bayesian_asymmetric_analysis_optimized(features_a, features_b)
-                results.traces = bayesian_results['traces']
-                results.models = bayesian_results['models']
-                results.interaction_coefficients = bayesian_results['coefficients']
-                
-                print(f"ベイズ非対称分析完了:")
-                for direction, coeffs in results.interaction_coefficients.items():
-                    if isinstance(coeffs, dict):
-                        total_strength = sum(abs(v) for v in coeffs.values() if isinstance(v, (int, float)))
-                        print(f"  {direction}: {total_strength:.4f}")
-                
-            except Exception as e:
-                print(f"ベイズ推定エラー: {e}")
-                print("古典的手法にフォールバック")
-                use_bayesian = False
-        
-        # 古典的相互作用分析（フォールバック、JIT最適化）
-        if not use_bayesian or not BAYESIAN_AVAILABLE:
-            classical_results = self._classical_asymmetric_analysis_optimized(features_a, features_b)
-            results.interaction_coefficients = classical_results
+        try:
+            if use_bayesian and BAYESIAN_AVAILABLE:
+                # ベイズペアワイズ分析
+                results = self._analyze_with_bayesian(features_a, features_b, data_a, data_b, name_a, name_b)
+            else:
+                # 標準ペアワイズ分析
+                results = self._analyze_standard(features_a, features_b, data_a, data_b, name_a, name_b)
             
-            print(f"古典的非対称分析完了:")
-            for direction, coeffs in results.interaction_coefficients.items():
-                if isinstance(coeffs, dict):
-                    total_strength = sum(abs(v) for v in coeffs.values() if isinstance(v, (int, float)))
-                    print(f"  {direction}: {total_strength:.4f}")
+            # 処理時間記録
+            results.processing_time = time.time() - start_time
+            
+            return results
+            
+        except Exception as e:
+            raise Lambda3Error(f"Pairwise analysis failed for {name_a}-{name_b}: {e}")
+    
+    def _validate_inputs(self, features_a: StructuralTensorProtocol, features_b: StructuralTensorProtocol):
+        """入力検証"""
+        if TYPES_AVAILABLE:
+            if not is_structural_tensor_compatible(features_a):
+                raise Lambda3Error("features_a is not compatible with StructuralTensorProtocol")
+            if not is_structural_tensor_compatible(features_b):
+                raise Lambda3Error("features_b is not compatible with StructuralTensorProtocol")
         
-        # 非対称性メトリクス計算
-        asymmetry_metrics = self._calculate_pairwise_asymmetry(results.interaction_coefficients)
-        results.asymmetry_metrics = asymmetry_metrics
+        # データの存在確認
+        data_a = self._get_data_length(features_a)
+        data_b = self._get_data_length(features_b)
         
-        print(f"非対称性メトリクス:")
-        for metric, value in asymmetry_metrics.items():
-            print(f"  {metric}: {value:.4f}")
+        if data_a < 10 or data_b < 10:
+            raise Lambda3Error("Insufficient data for pairwise analysis")
+    
+    def _get_data_length(self, features: StructuralTensorProtocol) -> int:
+        """データ長取得"""
+        if hasattr(features, 'data'):
+            return len(features.data)
+        elif hasattr(features, '__getitem__') and 'data' in features:
+            return len(features['data'])
+        elif hasattr(features, '__len__'):
+            return len(features)
+        else:
+            return 0
+    
+    def _extract_data_from_features(self, features: StructuralTensorProtocol) -> Tuple[np.ndarray, str]:
+        """特徴量からデータ抽出"""
         
-        # 因果パターン分析（JIT最適化）
-        causality_patterns = self._analyze_causality_patterns_optimized(features_a, features_b)
-        results.causality_patterns = causality_patterns
+        # データの取得
+        if hasattr(features, 'data'):
+            data = features.data
+            series_name = getattr(features, 'series_name', 'Series')
+        elif hasattr(features, '__getitem__') and 'data' in features:
+            data = features['data']
+            series_name = features.get('series_name', 'Series')
+        else:
+            # フォールバック：features自体をデータとして扱う
+            data = np.asarray(features)
+            series_name = 'Series'
         
-        print(f"因果パターン分析:")
-        for pattern, lags in causality_patterns.items():
-            if lags:
-                max_causality = max(lags.values())
-                print(f"  {pattern}: 最大因果確率 {max_causality:.4f}")
+        # 型安全性確保
+        if TYPES_AVAILABLE:
+            data = ensure_float_array(data)
+        else:
+            data = np.asarray(data, dtype=np.float64)
         
-        # 相互作用品質評価
-        quality_metrics = self._evaluate_interaction_quality(results)
-        results.interaction_quality = quality_metrics
+        return data, series_name
+    
+    def _analyze_standard(
+        self,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol,
+        data_a: np.ndarray,
+        data_b: np.ndarray,
+        name_a: str,
+        name_b: str
+    ) -> PairwiseInteractionResults:
+        """標準ペアワイズ分析"""
         
-        print(f"相互作用品質: {quality_metrics.get('overall_quality', 0):.3f}")
+        print(f"Running standard pairwise analysis: {name_a} ↔ {name_b}")
         
-        # 解析履歴記録
-        self.analysis_history.append({
-            'series_pair': series_names,
-            'data_length': min_length,
-            'method': 'bayesian' if use_bayesian and BAYESIAN_AVAILABLE else 'classical',
-            'asymmetry_score': results.get_asymmetry_score(),
-            'coupling_strength': results.calculate_bidirectional_coupling(),
-            'quality': quality_metrics.get('overall_quality', 0),
-            'jit_optimized': self.use_jit
-        })
+        # データ長の統一
+        min_length = min(len(data_a), len(data_b))
+        data_a_aligned = data_a[:min_length]
+        data_b_aligned = data_b[:min_length]
+        
+        # 同期性分析
+        sync_results = self._calculate_synchronization(data_a_aligned, data_b_aligned, features_a, features_b)
+        
+        # 因果性分析
+        causality_results = self._calculate_causality(data_a_aligned, data_b_aligned, features_a, features_b)
+        
+        # 相互作用係数計算
+        interaction_coeffs = self._calculate_interaction_coefficients(features_a, features_b)
+        
+        # 位相結合分析
+        phase_coupling = self._calculate_phase_coupling(data_a_aligned, data_b_aligned)
+        
+        # 品質評価
+        correlation_quality = self._assess_correlation_quality(data_a_aligned, data_b_aligned)
+        
+        # 拡張メトリクス計算
+        asymmetry_metrics = self._calculate_asymmetry_metrics(causality_results)
+        causality_patterns = self._calculate_causality_patterns(data_a_aligned, data_b_aligned)
+        prediction_metrics = self._calculate_prediction_metrics(data_a_aligned, data_b_aligned)
+        interaction_quality = self._calculate_interaction_quality(sync_results, causality_results, correlation_quality)
+        
+        # 結果構築
+        results = PairwiseInteractionResults(
+            name_a=name_a,
+            name_b=name_b,
+            synchronization_strength=sync_results['sync_strength'],
+            structure_synchronization=sync_results['structure_sync'],
+            causality_a_to_b=causality_results['a_to_b'],
+            causality_b_to_a=causality_results['b_to_a'],
+            asymmetry_index=abs(causality_results['a_to_b'] - causality_results['b_to_a']),
+            data_overlap_length=min_length,
+            correlation_quality=correlation_quality,
+            synchronization_profile=sync_results['profile'],
+            interaction_coefficients=interaction_coeffs,
+            phase_coupling=phase_coupling,
+            analysis_method='standard',
+            asymmetry_metrics=asymmetry_metrics,
+            causality_patterns=causality_patterns,
+            prediction_metrics=prediction_metrics,
+            interaction_quality=interaction_quality
+        )
         
         return results
     
-    def compare_multiple_pairs(
+    def _analyze_with_bayesian(
         self,
-        features_dict: Dict[str, StructuralTensorFeatures],
-        use_bayesian: bool = True
-    ) -> Dict[str, Any]:
-        """
-        複数ペア相互作用比較（JIT最適化版）
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol,
+        data_a: np.ndarray,
+        data_b: np.ndarray,
+        name_a: str,
+        name_b: str
+    ) -> PairwiseInteractionResults:
+        """ベイズペアワイズ分析"""
         
-        Lambda³理論: 複数の構造テンソル系列ペア間の
-        相互作用パターン比較とネットワーク構造解析
+        print(f"Running Bayesian pairwise analysis: {name_a} ↔ {name_b}")
         
-        Args:
-            features_dict: {series_name: features} 辞書
-            use_bayesian: ベイズ推定使用フラグ
-            
-        Returns:
-            Dict: 複数ペア比較結果
-        """
-        series_names = list(features_dict.keys())
-        if len(series_names) < 2:
-            raise ValueError("At least 2 series required for pairwise comparison")
+        # データ長の統一
+        min_length = min(len(data_a), len(data_b))
+        data_a_aligned = data_a[:min_length]
+        data_b_aligned = data_b[:min_length]
         
-        print(f"\n{'='*60}")
-        print(f"MULTIPLE PAIRWISE COMPARISON")
-        print(f"系列数: {len(series_names)}")
-        print(f"JIT最適化: {'有効' if self.use_jit else '無効'}")
-        print(f"{'='*60}")
+        # ベイズモデル構築と推定
+        trace, model = self._fit_bayesian_pairwise_model(data_a_aligned, data_b_aligned, features_a, features_b)
         
-        # 全ペア組み合わせの解析（JIT最適化）
-        pairwise_results = {}
-        interaction_matrix = np.zeros((len(series_names), len(series_names)), dtype=np.float64)
-        asymmetry_matrix = np.zeros((len(series_names), len(series_names)), dtype=np.float64)
+        # ベイズ結果から係数抽出
+        bayesian_coeffs = self._extract_bayesian_pairwise_coefficients(trace)
         
-        for i, name_a in enumerate(series_names):
-            for j, name_b in enumerate(series_names):
-                if i != j:  # 自己相互作用は除外
-                    pair_key = f"{name_a}_vs_{name_b}"
-                    
-                    try:
-                        result = self.analyze_asymmetric_interaction(
-                            features_dict[name_a], 
-                            features_dict[name_b], 
-                            use_bayesian
-                        )
-                        pairwise_results[pair_key] = result
-                        
-                        # 相互作用行列更新（JIT最適化版）
-                        coupling_strength = result.calculate_bidirectional_coupling()
-                        interaction_matrix[i, j] = coupling_strength
-                        
-                        # 非対称性行列更新
-                        asymmetry_score = result.get_asymmetry_score()
-                        asymmetry_matrix[i, j] = asymmetry_score
-                        
-                    except Exception as e:
-                        print(f"警告: {pair_key} の解析に失敗: {e}")
-                        continue
-                else:
-                    interaction_matrix[i, j] = 1.0  # 自己相互作用
-                    asymmetry_matrix[i, j] = 0.0   # 自己非対称性はゼロ
+        # 標準分析も実行（比較用）
+        sync_results = self._calculate_synchronization(data_a_aligned, data_b_aligned, features_a, features_b)
+        phase_coupling = self._calculate_phase_coupling(data_a_aligned, data_b_aligned)
+        correlation_quality = self._assess_correlation_quality(data_a_aligned, data_b_aligned)
         
-        # ネットワーク解析（JIT最適化）
-        network_analysis = self._analyze_interaction_network_optimized(
-            interaction_matrix, asymmetry_matrix, series_names
+        # 拡張メトリクス計算
+        asymmetry_metrics = self._calculate_asymmetry_metrics(bayesian_coeffs)
+        causality_patterns = self._calculate_causality_patterns(data_a_aligned, data_b_aligned)
+        prediction_metrics = self._calculate_prediction_metrics(data_a_aligned, data_b_aligned)
+        interaction_quality = self._calculate_interaction_quality(sync_results, bayesian_coeffs, correlation_quality)
+        
+        # 結果構築
+        results = PairwiseInteractionResults(
+            name_a=name_a,
+            name_b=name_b,
+            synchronization_strength=sync_results['sync_strength'],
+            structure_synchronization=sync_results['structure_sync'],
+            causality_a_to_b=bayesian_coeffs.get('causality_a_to_b', 0.0),
+            causality_b_to_a=bayesian_coeffs.get('causality_b_to_a', 0.0),
+            asymmetry_index=bayesian_coeffs.get('asymmetry', 0.0),
+            data_overlap_length=min_length,
+            correlation_quality=correlation_quality,
+            synchronization_profile=sync_results['profile'],
+            interaction_coefficients={'bayesian': bayesian_coeffs},
+            phase_coupling=phase_coupling,
+            analysis_method='bayesian',
+            bayesian_trace=trace,
+            asymmetry_metrics=asymmetry_metrics,
+            causality_patterns=causality_patterns,
+            prediction_metrics=prediction_metrics,
+            interaction_quality=interaction_quality
         )
         
-        # 統計的比較
-        comparative_stats = self._calculate_comparative_statistics(pairwise_results)
-        
-        comparison_results = {
-            'series_names': series_names,
-            'pairwise_results': pairwise_results,
-            'interaction_matrix': interaction_matrix,
-            'asymmetry_matrix': asymmetry_matrix,
-            'network_analysis': network_analysis,
-            'comparative_statistics': comparative_stats,
-            'summary': {
-                'total_pairs_analyzed': len(pairwise_results),
-                'mean_interaction_strength': float(np.mean(interaction_matrix[interaction_matrix > 0])),
-                'mean_asymmetry': float(np.mean(asymmetry_matrix[asymmetry_matrix > 0])),
-                'max_coupling': float(np.max(interaction_matrix)),
-                'strongest_pair': self._find_strongest_pair(pairwise_results)
-            }
-        }
-        
-        print(f"複数ペア比較完了:")
-        print(f"  解析ペア数: {len(pairwise_results)}")
-        print(f"  平均相互作用強度: {comparison_results['summary']['mean_interaction_strength']:.4f}")
-        print(f"  平均非対称性: {comparison_results['summary']['mean_asymmetry']:.4f}")
-        
-        return comparison_results
+        return results
     
-    def _truncate_features_optimized(self, features: StructuralTensorFeatures, length: int) -> StructuralTensorFeatures:
-        """特徴量を指定長に切り詰め（JIT最適化版）"""
-        truncated = StructuralTensorFeatures(
-            data=features.data[:length].astype(np.float64),  # 型の明示
-            series_name=features.series_name
-        )
-        
-        # 各特徴量を切り詰め（数値安定性確保）
-        for attr_name in ['delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend']:
-            attr_value = getattr(features, attr_name)
-            if attr_value is not None:
-                setattr(truncated, attr_name, attr_value[:length].astype(np.float64))
-        
-        return truncated
-    
-    def _calculate_synchronization_profile_optimized(
+    def _calculate_synchronization(
         self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures
+        data_a: np.ndarray,
+        data_b: np.ndarray,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
     ) -> Dict[str, Any]:
-        """同期プロファイル計算（JIT最適化版）"""
-        # 構造変化イベント系列（型安全性確保）
-        events_a = (features_a.delta_LambdaC_pos + features_a.delta_LambdaC_neg).astype(np.float64)
-        events_b = (features_b.delta_LambdaC_pos + features_b.delta_LambdaC_neg).astype(np.float64)
+        """同期性計算"""
         
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                # JIT最適化による同期プロファイル計算
-                lags, sync_values, max_sync, optimal_lag = calculate_sync_profile_fixed(
-                    events_a,
-                    events_b,
-                    self.config.causality_lag_window
-                )
-                
-                print(f"  JIT同期計算成功: {len(lags)} lag points")
-                
-            except Exception as e:
-                print(f"JIT同期計算エラー: {e}, フォールバック使用")
-                # フォールバック
-                lags, sync_values, max_sync, optimal_lag = self._fallback_sync_profile(
-                    events_a, events_b
-                )
+        # 基本同期強度
+        if len(data_a) > 1 and len(data_b) > 1:
+            correlation = np.corrcoef(data_a, data_b)[0, 1]
+            sync_strength = abs(correlation) if not np.isnan(correlation) else 0.0
         else:
-            # 標準実装
-            lags, sync_values, max_sync, optimal_lag = self._fallback_sync_profile(
-                events_a, events_b
-            )
+            sync_strength = 0.0
         
-        # 張力スカラー同期（JIT最適化版）
+        # 構造変化同期
+        structure_sync = self._calculate_structure_synchronization(features_a, features_b)
+        
+        # 同期プロファイル
         if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                # 正規化後の相関計算
-                rho_a_norm = normalize_array_fixed(features_a.rho_T, 'zscore')
-                rho_b_norm = normalize_array_fixed(features_b.rho_T, 'zscore')
-                
-                if np.std(rho_a_norm) > 1e-8 and np.std(rho_b_norm) > 1e-8:
-                    rho_correlation = np.corrcoef(rho_a_norm, rho_b_norm)[0, 1]
-                    if np.isnan(rho_correlation):
-                        rho_correlation = 0.0
-                else:
-                    rho_correlation = 0.0
-                
-            except Exception as e:
-                print(f"JIT張力相関計算エラー: {e}")
-                rho_correlation = 0.0
+            sync_profile = self._calculate_sync_profile_jit(data_a, data_b)
         else:
-            # 標準実装
-            try:
-                rho_correlation = np.corrcoef(features_a.rho_T, features_b.rho_T)[0, 1]
-                if np.isnan(rho_correlation):
-                    rho_correlation = 0.0
-            except:
-                rho_correlation = 0.0
+            sync_profile = self._calculate_sync_profile_python(data_a, data_b)
         
         return {
-            'lag_profile': {int(lag): float(sync) for lag, sync in zip(lags, sync_values)},
-            'max_sync': float(max_sync),
-            'optimal_lag': int(optimal_lag),
-            'tension_correlation': float(rho_correlation),
-            'sync_stability': float(np.std(sync_values)) if len(sync_values) > 0 else 0.0
+            'sync_strength': sync_strength,
+            'structure_sync': structure_sync,
+            'profile': sync_profile
         }
     
-    def _fallback_sync_profile(self, events_a: np.ndarray, events_b: np.ndarray) -> Tuple[np.ndarray, np.ndarray, float, int]:
-        """同期プロファイル計算のフォールバック実装"""
-        lag_window = self.config.causality_lag_window
-        lags = np.arange(-lag_window, lag_window + 1)
-        sync_values = np.zeros(len(lags))
-        
-        for i, lag in enumerate(lags):
-            try:
-                if lag == 0:
-                    if len(events_a) > 1 and np.std(events_a) > 1e-8 and np.std(events_b) > 1e-8:
-                        sync_values[i] = np.corrcoef(events_a, events_b)[0, 1]
-                    else:
-                        sync_values[i] = 0.0
-                elif lag > 0:
-                    if lag < len(events_a):
-                        a_subset = events_a[:-lag]
-                        b_subset = events_b[lag:]
-                        if len(a_subset) > 1 and np.std(a_subset) > 1e-8 and np.std(b_subset) > 1e-8:
-                            sync_values[i] = np.corrcoef(a_subset, b_subset)[0, 1]
-                        else:
-                            sync_values[i] = 0.0
-                else:
-                    abs_lag = -lag
-                    if abs_lag < len(events_b):
-                        a_subset = events_a[abs_lag:]
-                        b_subset = events_b[:-abs_lag]
-                        if len(a_subset) > 1 and np.std(a_subset) > 1e-8 and np.std(b_subset) > 1e-8:
-                            sync_values[i] = np.corrcoef(a_subset, b_subset)[0, 1]
-                        else:
-                            sync_values[i] = 0.0
-            except:
-                sync_values[i] = 0.0
-        
-        # NaN値を0に置換
-        sync_values = np.nan_to_num(sync_values, nan=0.0)
-        
-        max_idx = np.argmax(np.abs(sync_values))
-        max_sync = sync_values[max_idx]
-        optimal_lag = lags[max_idx]
-        
-        return lags, sync_values, max_sync, optimal_lag
-    
-    def _classical_asymmetric_analysis_optimized(
+    def _calculate_structure_synchronization(
         self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures
-    ) -> Dict[str, Dict[str, float]]:
-        """古典的非対称相互作用分析（JIT最適化版）"""
-        name_a, name_b = features_a.series_name, features_b.series_name
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> float:
+        """構造変化同期計算"""
         
-        # JIT最適化による相関計算
-        def calculate_cross_correlation_optimized(source_events, target_events):
-            if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-                try:
-                    # 正規化による数値安定性確保
-                    source_norm = normalize_array_fixed(source_events, 'zscore')
-                    target_norm = normalize_array_fixed(target_events, 'zscore')
-                    
-                    if np.std(source_norm) > 1e-8 and np.std(target_norm) > 1e-8:
-                        correlation = np.corrcoef(source_norm, target_norm)[0, 1]
-                        return 0.0 if np.isnan(correlation) else correlation
-                    else:
-                        return 0.0
-                        
-                except Exception as e:
-                    print(f"JIT相関計算エラー: {e}")
-                    return 0.0
+        # 構造変化イベントの取得
+        events_a = self._get_structure_events(features_a)
+        events_b = self._get_structure_events(features_b)
+        
+        # 長さの統一
+        min_length = min(len(events_a), len(events_b))
+        if min_length > 1:
+            events_a = events_a[:min_length]
+            events_b = events_b[:min_length]
+            
+            # 構造変化同期率
+            if np.sum(events_a) > 0 and np.sum(events_b) > 0:
+                sync_rate = np.mean(events_a * events_b)
             else:
-                # 標準実装
-                if np.sum(source_events) > 0 and np.sum(target_events) > 0:
-                    try:
-                        correlation = np.corrcoef(source_events, target_events)[0, 1]
-                        return 0.0 if np.isnan(correlation) else correlation
-                    except:
-                        return 0.0
-                return 0.0
+                sync_rate = 0.0
+        else:
+            sync_rate = 0.0
         
-        coefficients = {
-            f'{name_b}_to_{name_a}': {
-                'pos_jump': calculate_cross_correlation_optimized(
-                    features_b.delta_LambdaC_pos, features_a.delta_LambdaC_pos
-                ),
-                'neg_jump': calculate_cross_correlation_optimized(
-                    features_b.delta_LambdaC_neg, features_a.delta_LambdaC_neg
-                ),
-                'tension': calculate_cross_correlation_optimized(
-                    features_b.rho_T, features_a.rho_T
-                )
-            },
-            f'{name_a}_to_{name_b}': {
-                'pos_jump': calculate_cross_correlation_optimized(
-                    features_a.delta_LambdaC_pos, features_b.delta_LambdaC_pos
-                ),
-                'neg_jump': calculate_cross_correlation_optimized(
-                    features_a.delta_LambdaC_neg, features_b.delta_LambdaC_neg
-                ),
-                'tension': calculate_cross_correlation_optimized(
-                    features_a.rho_T, features_b.rho_T
-                )
-            }
-        }
-        
-        return coefficients
+        return sync_rate
     
-    def _analyze_causality_patterns_optimized(
+    def _get_structure_events(self, features: StructuralTensorProtocol) -> np.ndarray:
+        """構造変化イベント取得"""
+        
+        if hasattr(features, 'delta_LambdaC_pos') and hasattr(features, 'delta_LambdaC_neg'):
+            pos_events = features.delta_LambdaC_pos if features.delta_LambdaC_pos is not None else np.array([])
+            neg_events = features.delta_LambdaC_neg if features.delta_LambdaC_neg is not None else np.array([])
+            
+            if len(pos_events) > 0 and len(neg_events) > 0:
+                return pos_events + neg_events
+            elif len(pos_events) > 0:
+                return pos_events
+            elif len(neg_events) > 0:
+                return neg_events
+            else:
+                return np.array([])
+                
+        elif isinstance(features, dict):
+            pos_events = features.get('delta_LambdaC_pos', np.array([]))
+            neg_events = features.get('delta_LambdaC_neg', np.array([]))
+            
+            if len(pos_events) > 0 and len(neg_events) > 0:
+                return pos_events + neg_events
+            elif len(pos_events) > 0:
+                return pos_events
+            else:
+                return np.array([])
+        
+        return np.array([])
+    
+    def _calculate_sync_profile_jit(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """JIT同期プロファイル計算"""
+        
+        try:
+            lag_window = getattr(self.config, 'lag_window', 10)
+            
+            # JIT関数で同期プロファイル計算
+            lags, sync_values, max_sync, optimal_lag = calculate_sync_profile_fixed(
+                data_a, data_b, lag_window
+            )
+            
+            return {
+                'max_sync': float(max_sync),
+                'optimal_lag': int(optimal_lag),
+                'profile': {int(lag): float(sync) for lag, sync in zip(lags, sync_values)}
+            }
+            
+        except Exception as e:
+            print(f"JIT sync profile calculation failed: {e}, falling back to Python")
+            return self._calculate_sync_profile_python(data_a, data_b)
+    
+    def _calculate_sync_profile_python(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """Python同期プロファイル計算"""
+        
+        lag_window = getattr(self.config, 'lag_window', 10)
+        sync_profile = {}
+        max_sync = 0.0
+        optimal_lag = 0
+        
+        for lag in range(-lag_window, lag_window + 1):
+            if lag < 0:
+                if -lag < len(data_a):
+                    sync = np.corrcoef(data_a[-lag:], data_b[:lag])[0, 1] if len(data_a[-lag:]) > 1 else 0.0
+                else:
+                    sync = 0.0
+            elif lag > 0:
+                if lag < len(data_b):
+                    sync = np.corrcoef(data_a[:-lag], data_b[lag:])[0, 1] if len(data_a[:-lag]) > 1 else 0.0
+                else:
+                    sync = 0.0
+            else:
+                sync = np.corrcoef(data_a, data_b)[0, 1] if len(data_a) > 1 else 0.0
+            
+            if np.isnan(sync):
+                sync = 0.0
+            
+            sync_profile[lag] = abs(sync)
+            
+            if abs(sync) > max_sync:
+                max_sync = abs(sync)
+                optimal_lag = lag
+        
+        return {
+            'max_sync': max_sync,
+            'optimal_lag': optimal_lag,
+            'profile': sync_profile
+        }
+    
+    def _calculate_causality(
         self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures
-    ) -> Dict[str, Dict[int, float]]:
-        """因果パターン分析（JIT最適化版）"""
-        patterns = {}
+        data_a: np.ndarray,
+        data_b: np.ndarray,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Dict[str, float]:
+        """因果性計算"""
         
-        # 各構造変化タイプの因果パターン
-        event_types = [
-            ('pos', features_a.delta_LambdaC_pos, features_b.delta_LambdaC_pos),
-            ('neg', features_a.delta_LambdaC_neg, features_b.delta_LambdaC_neg)
-        ]
+        # 基本遅延相関による因果性
+        causality_a_to_b = self._calculate_lagged_correlation(data_a, data_b, direction='forward')
+        causality_b_to_a = self._calculate_lagged_correlation(data_b, data_a, direction='forward')
         
-        for event_type, events_a, events_b in event_types:
-            # データ型確保
-            events_a = events_a.astype(np.float64)
-            events_b = events_b.astype(np.float64)
+        # 構造変化因果性
+        structure_causality = self._calculate_structure_causality(features_a, features_b)
+        
+        # 統合因果性
+        integrated_a_to_b = (causality_a_to_b + structure_causality['a_to_b']) / 2
+        integrated_b_to_a = (causality_b_to_a + structure_causality['b_to_a']) / 2
+        
+        return {
+            'a_to_b': integrated_a_to_b,
+            'b_to_a': integrated_b_to_a
+        }
+    
+    def _calculate_lagged_correlation(self, series_cause: np.ndarray, series_effect: np.ndarray, direction: str = 'forward') -> float:
+        """遅延相関計算"""
+        
+        max_causality = 0.0
+        
+        for lag in range(1, min(10, len(series_cause) // 10)):
+            if direction == 'forward' and lag < len(series_cause):
+                cause_past = series_cause[:-lag]
+                effect_future = series_effect[lag:]
+                
+                if len(cause_past) > 1 and len(effect_future) > 1:
+                    correlation = np.corrcoef(cause_past, effect_future)[0, 1]
+                    if not np.isnan(correlation):
+                        max_causality = max(max_causality, abs(correlation))
+        
+        return max_causality
+    
+    def _calculate_structure_causality(
+        self,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Dict[str, float]:
+        """構造変化因果性計算"""
+        
+        events_a = self._get_structure_events(features_a)
+        events_b = self._get_structure_events(features_b)
+        
+        # 長さの統一
+        min_length = min(len(events_a), len(events_b))
+        if min_length > 10:
+            events_a = events_a[:min_length]
+            events_b = events_b[:min_length]
             
-            # A → B 因果関係（JIT最適化）
-            pattern_a_to_b = {}
-            for lag in range(1, self.config.causality_lag_window + 1):
-                if lag < len(events_a):
-                    cause_events = events_a[:-lag]
-                    effect_events = events_b[lag:]
-                    
-                    if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-                        # JIT最適化による安全な因果確率計算
-                        joint_prob = np.mean(cause_events * effect_events)
-                        cause_prob = np.mean(cause_events)
-                        
-                        causality_prob = safe_divide_fixed(joint_prob, cause_prob, 0.0)
-                    else:
-                        # 標準実装
-                        joint_prob = np.mean(cause_events * effect_events)
-                        cause_prob = np.mean(cause_events)
-                        causality_prob = joint_prob / max(cause_prob, 1e-8)
-                    
-                    pattern_a_to_b[lag] = causality_prob
+            # A→B構造因果性
+            causality_a_to_b = 0.0
+            causality_b_to_a = 0.0
             
-            patterns[f'{features_a.series_name}_{event_type}_to_{features_b.series_name}_{event_type}'] = pattern_a_to_b
-            
-            # B → A 因果関係（同様の最適化）
-            pattern_b_to_a = {}
-            for lag in range(1, self.config.causality_lag_window + 1):
-                if lag < len(events_b):
-                    cause_events = events_b[:-lag]
-                    effect_events = events_a[lag:]
+            for lag in range(1, min(5, min_length // 5)):
+                if lag < min_length:
+                    # A(t-lag) → B(t)
+                    joint_ab = np.mean(events_a[:-lag] * events_b[lag:])
+                    marginal_a = np.mean(events_a[:-lag])
+                    if marginal_a > 0:
+                        causality_a_to_b = max(causality_a_to_b, joint_ab / marginal_a)
                     
-                    if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-                        joint_prob = np.mean(cause_events * effect_events)
-                        cause_prob = np.mean(cause_events)
-                        causality_prob = safe_divide_fixed(joint_prob, cause_prob, 0.0)
-                    else:
-                        joint_prob = np.mean(cause_events * effect_events)
-                        cause_prob = np.mean(cause_events)
-                        causality_prob = joint_prob / max(cause_prob, 1e-8)
-                    
-                    pattern_b_to_a[lag] = causality_prob
+                    # B(t-lag) → A(t)
+                    joint_ba = np.mean(events_b[:-lag] * events_a[lag:])
+                    marginal_b = np.mean(events_b[:-lag])
+                    if marginal_b > 0:
+                        causality_b_to_a = max(causality_b_to_a, joint_ba / marginal_b)
+        else:
+            causality_a_to_b = 0.0
+            causality_b_to_a = 0.0
+        
+        return {
+            'a_to_b': causality_a_to_b,
+            'b_to_a': causality_b_to_a
+        }
+    
+    def _calculate_interaction_coefficients(
+        self,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Dict[str, Dict[str, float]]:
+        """相互作用係数計算"""
+        
+        # 張力スカラー相互作用
+        tension_interaction = self._calculate_tension_interaction(features_a, features_b)
+        
+        # 構造変化相互作用
+        structure_interaction = self._calculate_structure_interaction(features_a, features_b)
+        
+        return {
+            'tension': tension_interaction,
+            'structure': structure_interaction
+        }
+    
+    def _calculate_tension_interaction(
+        self,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Dict[str, float]:
+        """張力スカラー相互作用計算"""
+        
+        # 張力データ取得
+        rho_a = self._get_tension_data(features_a)
+        rho_b = self._get_tension_data(features_b)
+        
+        if len(rho_a) > 0 and len(rho_b) > 0:
+            min_length = min(len(rho_a), len(rho_b))
+            rho_a = rho_a[:min_length]
+            rho_b = rho_b[:min_length]
             
-            patterns[f'{features_b.series_name}_{event_type}_to_{features_a.series_name}_{event_type}'] = pattern_b_to_a
+            # 張力相関
+            if min_length > 1:
+                tension_correlation = np.corrcoef(rho_a, rho_b)[0, 1]
+                if np.isnan(tension_correlation):
+                    tension_correlation = 0.0
+            else:
+                tension_correlation = 0.0
+            
+            # 張力因果性
+            tension_causality_ab = self._calculate_lagged_correlation(rho_a, rho_b)
+            tension_causality_ba = self._calculate_lagged_correlation(rho_b, rho_a)
+        else:
+            tension_correlation = 0.0
+            tension_causality_ab = 0.0
+            tension_causality_ba = 0.0
+        
+        return {
+            'correlation': tension_correlation,
+            'causality_a_to_b': tension_causality_ab,
+            'causality_b_to_a': tension_causality_ba
+        }
+    
+    def _get_tension_data(self, features: StructuralTensorProtocol) -> np.ndarray:
+        """張力データ取得"""
+        
+        if hasattr(features, 'rho_T') and features.rho_T is not None:
+            return features.rho_T
+        elif isinstance(features, dict) and 'rho_T' in features:
+            return features['rho_T'] if features['rho_T'] is not None else np.array([])
+        else:
+            return np.array([])
+    
+    def _calculate_structure_interaction(
+        self,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Dict[str, float]:
+        """構造変化相互作用計算"""
+        
+        events_a = self._get_structure_events(features_a)
+        events_b = self._get_structure_events(features_b)
+        
+        if len(events_a) > 0 and len(events_b) > 0:
+            min_length = min(len(events_a), len(events_b))
+            events_a = events_a[:min_length]
+            events_b = events_b[:min_length]
+            
+            # 構造変化同時発生率
+            joint_events = np.mean(events_a * events_b)
+            
+            # 構造変化因果効果
+            causality_ab = self._calculate_lagged_correlation(events_a, events_b)
+            causality_ba = self._calculate_lagged_correlation(events_b, events_a)
+        else:
+            joint_events = 0.0
+            causality_ab = 0.0
+            causality_ba = 0.0
+        
+        return {
+            'joint_events': joint_events,
+            'causality_a_to_b': causality_ab,
+            'causality_b_to_a': causality_ba
+        }
+    
+    def _calculate_phase_coupling(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """位相結合計算"""
+        
+        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
+            return self._calculate_phase_coupling_jit(data_a, data_b)
+        else:
+            return self._calculate_phase_coupling_python(data_a, data_b)
+    
+    def _calculate_phase_coupling_jit(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """JIT位相結合計算"""
+        
+        try:
+            # JIT関数で位相結合検出
+            coupling_strength, phase_lag = detect_phase_coupling_fixed(data_a, data_b)
+            
+            return {
+                'coupling_strength': float(coupling_strength),
+                'phase_lag': float(phase_lag)
+            }
+            
+        except Exception as e:
+            print(f"JIT phase coupling calculation failed: {e}, falling back to Python")
+            return self._calculate_phase_coupling_python(data_a, data_b)
+    
+    def _calculate_phase_coupling_python(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """Python位相結合計算（簡易版）"""
+        
+        # 簡易位相結合（相関ベース）
+        if len(data_a) > 10 and len(data_b) > 10:
+            # 差分ベースの位相情報
+            phase_a = np.diff(data_a)
+            phase_b = np.diff(data_b)
+            
+            min_length = min(len(phase_a), len(phase_b))
+            phase_a = phase_a[:min_length]
+            phase_b = phase_b[:min_length]
+            
+            if min_length > 1:
+                coupling_strength = abs(np.corrcoef(phase_a, phase_b)[0, 1])
+                if np.isnan(coupling_strength):
+                    coupling_strength = 0.0
+                
+                # 位相遅延（クロス相関ピーク位置）
+                cross_corr = np.correlate(phase_a, phase_b, mode='full')
+                phase_lag = np.argmax(cross_corr) - len(phase_a) + 1
+            else:
+                coupling_strength = 0.0
+                phase_lag = 0.0
+        else:
+            coupling_strength = 0.0
+            phase_lag = 0.0
+        
+        return {
+            'coupling_strength': coupling_strength,
+            'phase_lag': float(phase_lag)
+        }
+    
+    def _assess_correlation_quality(self, data_a: np.ndarray, data_b: np.ndarray) -> float:
+        """相関品質評価"""
+        
+        # データ長による品質
+        length_quality = min(1.0, len(data_a) / 50)  # 50点以上で満点
+        
+        # 分散による品質
+        var_a = np.var(data_a)
+        var_b = np.var(data_b)
+        variance_quality = 1.0 if var_a > 1e-8 and var_b > 1e-8 else 0.5
+        
+        # 有限値による品質
+        finite_quality_a = np.sum(np.isfinite(data_a)) / len(data_a)
+        finite_quality_b = np.sum(np.isfinite(data_b)) / len(data_b)
+        finite_quality = (finite_quality_a + finite_quality_b) / 2
+        
+        # 統合品質
+        overall_quality = (length_quality * 0.3 + variance_quality * 0.3 + finite_quality * 0.4)
+        
+        return overall_quality
+    
+    def _calculate_asymmetry_metrics(self, causality_results: Dict[str, float]) -> Dict[str, float]:
+        """非対称性メトリクス計算"""
+        
+        a_to_b = causality_results.get('a_to_b', 0.0)
+        b_to_a = causality_results.get('b_to_a', 0.0)
+        
+        # 基本非対称性
+        basic_asymmetry = abs(a_to_b - b_to_a)
+        
+        # 正規化非対称性
+        total_strength = a_to_b + b_to_a
+        normalized_asymmetry = basic_asymmetry / (total_strength + 1e-8)
+        
+        # 優勢性指標
+        dominance = max(a_to_b, b_to_a) / (min(a_to_b, b_to_a) + 1e-8)
+        
+        return {
+            'basic_asymmetry': basic_asymmetry,
+            'normalized_asymmetry': normalized_asymmetry,
+            'dominance': dominance,
+            'total_asymmetry': normalized_asymmetry
+        }
+    
+    def _calculate_causality_patterns(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, Dict[int, float]]:
+        """因果性パターン計算"""
+        
+        patterns = {'a_to_b': {}, 'b_to_a': {}}
+        
+        for lag in range(1, min(20, len(data_a) // 10)):
+            if lag < len(data_a):
+                # A→B因果性
+                cause_a = data_a[:-lag]
+                effect_b = data_b[lag:]
+                if len(cause_a) > 1:
+                    corr_ab = np.corrcoef(cause_a, effect_b)[0, 1]
+                    patterns['a_to_b'][lag] = abs(corr_ab) if not np.isnan(corr_ab) else 0.0
+                
+                # B→A因果性
+                cause_b = data_b[:-lag]
+                effect_a = data_a[lag:]
+                if len(cause_b) > 1:
+                    corr_ba = np.corrcoef(cause_b, effect_a)[0, 1]
+                    patterns['b_to_a'][lag] = abs(corr_ba) if not np.isnan(corr_ba) else 0.0
         
         return patterns
     
-    def _analyze_interaction_network_optimized(
-        self,
-        interaction_matrix: np.ndarray,
-        asymmetry_matrix: np.ndarray,
-        series_names: List[str]
-    ) -> Dict[str, Any]:
-        """相互作用ネットワーク解析（JIT最適化版）"""
-        n_series = len(series_names)
+    def _calculate_prediction_metrics(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
+        """予測性能メトリクス計算"""
         
-        # 数値安定性確保
-        interaction_matrix = interaction_matrix.astype(np.float64)
-        asymmetry_matrix = asymmetry_matrix.astype(np.float64)
+        if len(data_a) < 20 or len(data_b) < 20:
+            return {'prediction_accuracy_a': 0.0, 'prediction_accuracy_b': 0.0}
         
-        # ネットワーク密度（JIT最適化考慮）
-        total_possible_edges = n_series * (n_series - 1)
-        active_edges = np.sum(interaction_matrix > self.config.min_causality_strength) - n_series
-        network_density = safe_divide_fixed(active_edges, total_possible_edges, 0.0)
+        # 簡易予測精度（直線回帰ベース）
+        mid_point = len(data_a) // 2
         
-        # 中心性計算（JIT最適化版）
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                # 対角成分を除いた計算
-                diag_mask = np.eye(n_series, dtype=bool)
-                interaction_matrix_no_diag = interaction_matrix.copy()
-                interaction_matrix_no_diag[diag_mask] = 0.0
-                
-                out_strength = np.sum(interaction_matrix_no_diag, axis=1)
-                in_strength = np.sum(interaction_matrix_no_diag, axis=0)
-                total_strength = out_strength + in_strength
-                
-            except Exception as e:
-                print(f"JIT中心性計算エラー: {e}")
-                # フォールバック
-                out_strength = np.sum(interaction_matrix, axis=1) - np.diag(interaction_matrix)
-                in_strength = np.sum(interaction_matrix, axis=0) - np.diag(interaction_matrix)
-                total_strength = out_strength + in_strength
-        else:
-            # 標準実装
-            out_strength = np.sum(interaction_matrix, axis=1) - np.diag(interaction_matrix)
-            in_strength = np.sum(interaction_matrix, axis=0) - np.diag(interaction_matrix)
-            total_strength = out_strength + in_strength
+        # Aの予測精度
+        train_a = data_a[:mid_point]
+        test_a = data_a[mid_point:]
+        predicted_a = np.linspace(train_a[-1], train_a[-1] + (train_a[-1] - train_a[0]), len(test_a))
+        mse_a = np.mean((test_a - predicted_a) ** 2)
+        baseline_var_a = np.var(test_a)
+        accuracy_a = max(0.0, 1.0 - mse_a / (baseline_var_a + 1e-8))
         
-        centrality_ranking = sorted(
-            [(i, series_names[i], total_strength[i]) for i in range(n_series)],
-            key=lambda x: x[2], reverse=True
-        )
-        
-        # 非対称性統計（安全な計算）
-        positive_asymmetry_mask = asymmetry_matrix > 0
-        if np.any(positive_asymmetry_mask):
-            asymmetry_stats = {
-                'mean_asymmetry': float(np.mean(asymmetry_matrix[positive_asymmetry_mask])),
-                'max_asymmetry': float(np.max(asymmetry_matrix)),
-                'asymmetry_std': float(np.std(asymmetry_matrix[positive_asymmetry_mask]))
-            }
-        else:
-            asymmetry_stats = {
-                'mean_asymmetry': 0.0,
-                'max_asymmetry': 0.0,
-                'asymmetry_std': 0.0
-            }
+        # Bの予測精度
+        train_b = data_b[:mid_point]
+        test_b = data_b[mid_point:]
+        predicted_b = np.linspace(train_b[-1], train_b[-1] + (train_b[-1] - train_b[0]), len(test_b))
+        mse_b = np.mean((test_b - predicted_b) ** 2)
+        baseline_var_b = np.var(test_b)
+        accuracy_b = max(0.0, 1.0 - mse_b / (baseline_var_b + 1e-8))
         
         return {
-            'network_density': network_density,
-            'centrality_ranking': [(name, float(strength)) for _, name, strength in centrality_ranking],
-            'asymmetry_statistics': asymmetry_stats,
-            'strongest_connections': self._find_strongest_connections(interaction_matrix, series_names),
-            'most_asymmetric_pairs': self._find_most_asymmetric_pairs(asymmetry_matrix, series_names)
+            'prediction_accuracy_a': accuracy_a,
+            'prediction_accuracy_b': accuracy_b
         }
     
-    def _bayesian_asymmetric_analysis_optimized(
-        self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures
-    ) -> Dict[str, Any]:
-        """ベイズ非対称相互作用分析（JIT最適化版）"""
-        if not BAYESIAN_AVAILABLE:
-            raise ImportError("PyMC not available for Bayesian analysis")
-        
-        name_a, name_b = features_a.series_name, features_b.series_name
-        print(f"  ベイズモデル構築中...")
-        
-        # データ前処理（JIT最適化）
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                # 正規化による数値安定性確保
-                data_a_norm = normalize_array_fixed(features_a.data, 'zscore')
-                data_b_norm = normalize_array_fixed(features_b.data, 'zscore')
-                
-                features_a_norm = self._normalize_features(features_a)
-                features_b_norm = self._normalize_features(features_b)
-                
-            except Exception as e:
-                print(f"JIT正規化エラー: {e}")
-                # フォールバック
-                data_a_norm = (features_a.data - np.mean(features_a.data)) / (np.std(features_a.data) + 1e-8)
-                data_b_norm = (features_b.data - np.mean(features_b.data)) / (np.std(features_b.data) + 1e-8)
-                features_a_norm = features_a
-                features_b_norm = features_b
-        else:
-            # 標準正規化
-            data_a_norm = (features_a.data - np.mean(features_a.data)) / (np.std(features_a.data) + 1e-8)
-            data_b_norm = (features_b.data - np.mean(features_b.data)) / (np.std(features_b.data) + 1e-8)
-            features_a_norm = features_a
-            features_b_norm = features_b
-        
-        # A系列に対するB系列の影響モデル
-        print(f"    {name_b} → {name_a} 影響モデル")
-        trace_b_to_a, model_b_to_a = self._fit_asymmetric_model_optimized(
-            target_data=data_a_norm,
-            target_features=features_a_norm,
-            source_features=features_b_norm
-        )
-        
-        # B系列に対するA系列の影響モデル
-        print(f"    {name_a} → {name_b} 影響モデル")
-        trace_a_to_b, model_a_to_b = self._fit_asymmetric_model_optimized(
-            target_data=data_b_norm,
-            target_features=features_b_norm,
-            source_features=features_a_norm
-        )
-        
-        # 相互作用係数抽出
-        coefficients = self._extract_interaction_coefficients(
-            trace_b_to_a, trace_a_to_b, name_a, name_b
-        )
-        
-        return {
-            'traces': {f'{name_b}_to_{name_a}': trace_b_to_a, f'{name_a}_to_{name_b}': trace_a_to_b},
-            'models': {f'{name_b}_to_{name_a}': model_b_to_a, f'{name_a}_to_{name_b}': model_a_to_b},
-            'coefficients': coefficients
-        }
-    
-    def _normalize_features(self, features: StructuralTensorFeatures) -> StructuralTensorFeatures:
-        """特徴量正規化（JIT最適化使用）"""
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                normalized_features = StructuralTensorFeatures(
-                    data=features.data,
-                    series_name=features.series_name,
-                    delta_LambdaC_pos=normalize_array_fixed(features.delta_LambdaC_pos, 'zscore'),
-                    delta_LambdaC_neg=normalize_array_fixed(features.delta_LambdaC_neg, 'zscore'),
-                    rho_T=normalize_array_fixed(features.rho_T, 'zscore'),
-                    time_trend=features.time_trend
-                )
-                return normalized_features
-            except Exception as e:
-                print(f"JIT特徴量正規化エラー: {e}")
-                return features
-        else:
-            return features
-    
-    def _fit_asymmetric_model_optimized(
-        self,
-        target_data: np.ndarray,
-        target_features: StructuralTensorFeatures,
-        source_features: StructuralTensorFeatures
-    ) -> Tuple[Any, Any]:
-        """非対称影響モデルフィッティング（JIT最適化版）"""
-        # データ型確保
-        target_data = target_data.astype(np.float64)
-        
-        with pm.Model() as model:
-            # 基本項
-            beta_0 = pm.Normal('beta_0', mu=0, sigma=2)
-            beta_time = pm.Normal('beta_time', mu=0, sigma=1)
-            
-            # 自己効果項
-            beta_self_pos = pm.Normal('beta_self_pos', mu=0, sigma=3)
-            beta_self_neg = pm.Normal('beta_self_neg', mu=0, sigma=3)
-            beta_self_tension = pm.Normal('beta_self_tension', mu=0, sigma=2)
-            
-            # 相互作用項（ソース→ターゲット）
-            beta_interact_pos = pm.Normal('beta_interact_pos', mu=0, sigma=2)
-            beta_interact_neg = pm.Normal('beta_interact_neg', mu=0, sigma=2)
-            beta_interact_tension = pm.Normal('beta_interact_tension', mu=0, sigma=1.5)
-            
-            # 平均モデル
-            mu = (
-                beta_0
-                + beta_time * target_features.time_trend.astype(np.float64)
-                + beta_self_pos * target_features.delta_LambdaC_pos.astype(np.float64)
-                + beta_self_neg * target_features.delta_LambdaC_neg.astype(np.float64)
-                + beta_self_tension * target_features.rho_T.astype(np.float64)
-                + beta_interact_pos * source_features.delta_LambdaC_pos.astype(np.float64)
-                + beta_interact_neg * source_features.delta_LambdaC_neg.astype(np.float64)
-                + beta_interact_tension * source_features.rho_T.astype(np.float64)
-            )
-            
-            # 観測モデル
-            sigma_obs = pm.HalfNormal('sigma_obs', sigma=1)
-            y_obs = pm.Normal('y_obs', mu=mu, sigma=sigma_obs, observed=target_data)
-            
-            # サンプリング
-            trace = pm.sample(
-                draws=self.bayesian_config.draws,
-                tune=self.bayesian_config.tune,
-                target_accept=self.bayesian_config.target_accept,
-                return_inferencedata=True,
-                cores=self.bayesian_config.cores,
-                chains=self.bayesian_config.chains
-            )
-        
-        return trace, model
-    
-    def detect_interaction_regimes(
-        self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures,
-        regime_window: int = 50
-    ) -> Dict[str, Any]:
-        """
-        相互作用レジーム検出（JIT最適化版）
-        
-        Lambda³理論: 構造テンソル相互作用の時変パターンを解析し、
-        相互作用強度の変化に基づくレジーム転換を検出
-        
-        Args:
-            features_a, features_b: 構造テンソル特徴量
-            regime_window: レジーム検出窓サイズ
-            
-        Returns:
-            Dict: 相互作用レジーム検出結果
-        """
-        print(f"\n相互作用レジーム検出: {features_a.series_name} ⇄ {features_b.series_name}")
-        print(f"JIT最適化: {'有効' if self.use_jit else '無効'}")
-        
-        # データ長統一
-        min_length = min(len(features_a.data), len(features_b.data))
-        
-        # ローリング相互作用強度計算（JIT最適化）
-        interaction_strength = []
-        asymmetry_scores = []
-        
-        for i in range(regime_window, min_length, regime_window // 2):
-            # 窓内データ抽出
-            window_start = max(0, i - regime_window)
-            window_end = min(min_length, i)
-            
-            features_a_window = self._extract_window_features(features_a, window_start, window_end)
-            features_b_window = self._extract_window_features(features_b, window_start, window_end)
-            
-            try:
-                # 窓内相互作用分析（高速版）
-                if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-                    # JIT最適化による高速窓内分析
-                    window_result = self._fast_window_interaction_analysis(
-                        features_a_window, features_b_window
-                    )
-                else:
-                    # 標準分析
-                    window_result = self.analyze_asymmetric_interaction(
-                        features_a_window, features_b_window, use_bayesian=False
-                    )
-                
-                interaction_strength.append(window_result.calculate_bidirectional_coupling())
-                asymmetry_scores.append(window_result.get_asymmetry_score())
-                
-            except Exception as e:
-                print(f"警告: 窓 {i} の分析に失敗: {e}")
-                interaction_strength.append(0.0)
-                asymmetry_scores.append(0.0)
-        
-        # レジーム境界検出（JIT最適化）
-        regime_boundaries = self._detect_regime_boundaries_optimized(
-            np.array(interaction_strength, dtype=np.float64), threshold_factor=1.5
-        )
-        
-        # レジーム特性分析
-        regime_characteristics = self._analyze_regime_characteristics(
-            interaction_strength, asymmetry_scores, regime_boundaries
-        )
-        
-        return {
-            'interaction_strength_series': interaction_strength,
-            'asymmetry_series': asymmetry_scores,
-            'regime_boundaries': regime_boundaries,
-            'regime_characteristics': regime_characteristics,
-            'window_size': regime_window,
-            'n_regimes': len(regime_characteristics),
-            'jit_optimized': self.use_jit
-        }
-    
-    def _fast_window_interaction_analysis(
-        self,
-        features_a: StructuralTensorFeatures,
-        features_b: StructuralTensorFeatures
-    ) -> PairwiseInteractionResults:
-        """高速窓内相互作用分析（JIT最適化専用）"""
-        series_names = (features_a.series_name, features_b.series_name)
-        results = PairwiseInteractionResults(series_names=series_names)
-        
-        # 高速同期計算
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                events_a = (features_a.delta_LambdaC_pos + features_a.delta_LambdaC_neg).astype(np.float64)
-                events_b = (features_b.delta_LambdaC_pos + features_b.delta_LambdaC_neg).astype(np.float64)
-                
-                # 簡易同期計算（JIT最適化）
-                if len(events_a) > 1 and np.std(events_a) > 1e-8 and np.std(events_b) > 1e-8:
-                    sync_corr = np.corrcoef(events_a, events_b)[0, 1]
-                    if np.isnan(sync_corr):
-                        sync_corr = 0.0
-                else:
-                    sync_corr = 0.0
-                
-                results.synchronization_profile = {'max_sync': float(sync_corr)}
-                
-                # 高速相互作用係数計算
-                name_a, name_b = features_a.series_name, features_b.series_name
-                
-                # 正規化相関（JIT最適化）
-                rho_a_norm = normalize_array_fixed(features_a.rho_T, 'zscore')
-                rho_b_norm = normalize_array_fixed(features_b.rho_T, 'zscore')
-                
-                if np.std(rho_a_norm) > 1e-8 and np.std(rho_b_norm) > 1e-8:
-                    tension_corr = np.corrcoef(rho_a_norm, rho_b_norm)[0, 1]
-                    if np.isnan(tension_corr):
-                        tension_corr = 0.0
-                else:
-                    tension_corr = 0.0
-                
-                results.interaction_coefficients = {
-                    f'{name_a}_to_{name_b}': {'tension': tension_corr * 0.5},
-                    f'{name_b}_to_{name_a}': {'tension': tension_corr * 0.5}
-                }
-                
-                # 簡易非対称性
-                results.asymmetry_metrics = {
-                    'total_asymmetry': abs(tension_corr * 0.1)
-                }
-                
-            except Exception as e:
-                print(f"高速分析エラー: {e}")
-                # 最小限の結果を返す
-                results.synchronization_profile = {'max_sync': 0.0}
-                results.interaction_coefficients = {
-                    f'{features_a.series_name}_to_{features_b.series_name}': {'tension': 0.0},
-                    f'{features_b.series_name}_to_{features_a.series_name}': {'tension': 0.0}
-                }
-                results.asymmetry_metrics = {'total_asymmetry': 0.0}
-        
-        return results
-    
-    def _extract_window_features(
-        self, 
-        features: StructuralTensorFeatures, 
-        start: int, 
-        end: int
-    ) -> StructuralTensorFeatures:
-        """窓内特徴量抽出（JIT最適化版）"""
-        # データ型の明示的確保
-        window_features = StructuralTensorFeatures(
-            data=features.data[start:end].astype(np.float64),
-            series_name=f"{features.series_name}_window_{start}_{end}"
-        )
-        
-        # 各特徴量を窓内で抽出（型安全性確保）
-        for attr_name in ['delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend']:
-            attr_value = getattr(features, attr_name)
-            if attr_value is not None:
-                setattr(window_features, attr_name, attr_value[start:end].astype(np.float64))
-        
-        return window_features
-    
-    def _detect_regime_boundaries_optimized(self, signal: np.ndarray, threshold_factor: float = 1.5) -> List[int]:
-        """レジーム境界検出（JIT最適化版）"""
-        if len(signal) < 3:
-            return []
-        
-        # 信号の1階差分（JIT最適化考慮）
-        if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-            try:
-                # 正規化による安定性確保
-                signal_norm = normalize_array_fixed(signal, 'zscore')
-                diff_signal = np.diff(signal_norm)
-            except Exception as e:
-                print(f"JIT境界検出エラー: {e}")
-                diff_signal = np.diff(signal)
-        else:
-            diff_signal = np.diff(signal)
-        
-        # 閾値設定
-        threshold = threshold_factor * np.std(diff_signal)
-        
-        # 境界点検出
-        boundaries = []
-        for i in range(1, len(diff_signal)):
-            if abs(diff_signal[i]) > threshold:
-                boundaries.append(i)
-        
-        return boundaries
-    
-    def _analyze_regime_characteristics(
-        self,
-        interaction_strength: List[float],
-        asymmetry_scores: List[float],
-        boundaries: List[int]
-    ) -> List[Dict[str, Any]]:
-        """レジーム特性分析（JIT最適化版）"""
-        if not boundaries:
-            boundaries = [0, len(interaction_strength)]
-        else:
-            boundaries = [0] + boundaries + [len(interaction_strength)]
-        
-        regimes = []
-        for i in range(len(boundaries) - 1):
-            start = boundaries[i]
-            end = boundaries[i + 1]
-            
-            if end > start:
-                regime_interaction = interaction_strength[start:end]
-                regime_asymmetry = asymmetry_scores[start:end]
-                
-                # JIT最適化による統計計算
-                if self.use_jit and JIT_FUNCTIONS_AVAILABLE:
-                    try:
-                        interaction_array = np.array(regime_interaction, dtype=np.float64)
-                        asymmetry_array = np.array(regime_asymmetry, dtype=np.float64)
-                        
-                        mean_interaction = float(np.mean(interaction_array))
-                        mean_asymmetry = float(np.mean(asymmetry_array))
-                        interaction_volatility = float(np.std(interaction_array))
-                        asymmetry_volatility = float(np.std(asymmetry_array))
-                    except Exception as e:
-                        print(f"JIT統計エラー: {e}")
-                        # フォールバック
-                        mean_interaction = float(np.mean(regime_interaction))
-                        mean_asymmetry = float(np.mean(regime_asymmetry))
-                        interaction_volatility = float(np.std(regime_interaction))
-                        asymmetry_volatility = float(np.std(regime_asymmetry))
-                else:
-                    # 標準統計計算
-                    mean_interaction = float(np.mean(regime_interaction))
-                    mean_asymmetry = float(np.mean(regime_asymmetry))
-                    interaction_volatility = float(np.std(regime_interaction))
-                    asymmetry_volatility = float(np.std(regime_asymmetry))
-                
-                regime_char = {
-                    'regime_id': i,
-                    'start_idx': start,
-                    'end_idx': end,
-                    'duration': end - start,
-                    'mean_interaction': mean_interaction,
-                    'mean_asymmetry': mean_asymmetry,
-                    'interaction_volatility': interaction_volatility,
-                    'asymmetry_volatility': asymmetry_volatility
-                }
-                
-                # レジーム分類
-                if regime_char['mean_interaction'] > 0.3:
-                    if regime_char['mean_asymmetry'] > 0.2:
-                        regime_char['regime_type'] = 'high_asymmetric_interaction'
-                    else:
-                        regime_char['regime_type'] = 'high_symmetric_interaction'
-                else:
-                    if regime_char['mean_asymmetry'] > 0.2:
-                        regime_char['regime_type'] = 'low_asymmetric_interaction'
-                    else:
-                        regime_char['regime_type'] = 'low_interaction'
-                
-                regimes.append(regime_char)
-        
-        return regimes
-    
-    def _calculate_pairwise_asymmetry(self, coefficients: Dict) -> Dict[str, float]:
-        """ペアワイズ非対称性計算"""
-        directions = list(coefficients.keys())
-        if len(directions) != 2:
-            return {'error': 'Invalid coefficient structure'}
-        
-        dir_1, dir_2 = directions
-        coeffs_1 = coefficients[dir_1]
-        coeffs_2 = coefficients[dir_2]
-        
-        # 成分別非対称性
-        pos_asymmetry = coeffs_1['pos_jump'] - coeffs_2['pos_jump']
-        neg_asymmetry = coeffs_1['neg_jump'] - coeffs_2['neg_jump']
-        tension_asymmetry = coeffs_1['tension'] - coeffs_2['tension']
-        
-        # 総合非対称性
-        total_asymmetry = abs(pos_asymmetry) + abs(neg_asymmetry) + abs(tension_asymmetry)
-        
-        return {
-            'pos_jump_asymmetry': pos_asymmetry,
-            'neg_jump_asymmetry': neg_asymmetry,
-            'tension_asymmetry': tension_asymmetry,
-            'total_asymmetry': total_asymmetry,
-            'directional_bias': (pos_asymmetry + neg_asymmetry + tension_asymmetry) / 3
-        }
-    
-    def _evaluate_interaction_quality(self, results: PairwiseInteractionResults) -> Dict[str, float]:
-        """相互作用品質評価"""
-        # 相互作用強度品質
-        total_interaction = results.calculate_bidirectional_coupling()
-        interaction_quality = min(1.0, total_interaction / 0.5)
-        
-        # 非対称性品質
-        asymmetry = results.get_asymmetry_score()
-        asymmetry_quality = 1 - abs(asymmetry - 0.3) / 0.7
-        asymmetry_quality = max(0, asymmetry_quality)
+    def _calculate_interaction_quality(self, sync_results: Dict, causality_results: Dict, correlation_quality: float) -> Dict[str, float]:
+        """相互作用品質計算"""
         
         # 同期品質
-        sync_profile = results.synchronization_profile
-        max_sync = sync_profile.get('max_sync', 0)
-        sync_quality = min(1.0, max_sync / 0.4)
+        sync_quality = sync_results.get('sync_strength', 0.0)
         
         # 因果品質
-        causality_patterns = results.causality_patterns
-        max_causality = 0
-        for pattern, lags in causality_patterns.items():
-            if lags:
-                max_causality = max(max_causality, max(lags.values()))
-        causality_quality = min(1.0, max_causality / 0.3)
+        causality_quality = (causality_results.get('a_to_b', 0.0) + causality_results.get('b_to_a', 0.0)) / 2
         
-        # 総合品質
-        overall_quality = (interaction_quality + asymmetry_quality + sync_quality + causality_quality) / 4
+        # 非対称性品質
+        asymmetry_quality = abs(causality_results.get('a_to_b', 0.0) - causality_results.get('b_to_a', 0.0))
+        
+        # 統合品質
+        interaction_quality = sync_quality * 0.4
+        overall_quality = (
+            sync_quality * 0.3 +
+            causality_quality * 0.3 +
+            correlation_quality * 0.4
+        )
         
         return {
             'interaction_quality': interaction_quality,
@@ -1207,215 +1009,276 @@ class PairwiseAnalyzer:
             'overall_quality': overall_quality
         }
     
-    def _extract_interaction_coefficients(self, trace_b_to_a, trace_a_to_b, name_a, name_b):
-        """相互作用係数抽出"""
-        summary_b_to_a = az.summary(trace_b_to_a)
-        summary_a_to_b = az.summary(trace_a_to_b)
+    def _fit_bayesian_pairwise_model(
+        self,
+        data_a: np.ndarray,
+        data_b: np.ndarray,
+        features_a: StructuralTensorProtocol,
+        features_b: StructuralTensorProtocol
+    ) -> Tuple[Any, Any]:
+        """ベイズペアワイズモデル推定"""
         
-        coefficients = {
-            f'{name_b}_to_{name_a}': {
-                'pos_jump': summary_b_to_a.loc['beta_interact_pos', 'mean'],
-                'neg_jump': summary_b_to_a.loc['beta_interact_neg', 'mean'],
-                'tension': summary_b_to_a.loc['beta_interact_tension', 'mean']
-            },
-            f'{name_a}_to_{name_b}': {
-                'pos_jump': summary_a_to_b.loc['beta_interact_pos', 'mean'],
-                'neg_jump': summary_a_to_b.loc['beta_interact_neg', 'mean'],
-                'tension': summary_a_to_b.loc['beta_interact_tension', 'mean']
+        # 張力データ取得
+        rho_a = self._get_tension_data(features_a)
+        rho_b = self._get_tension_data(features_b)
+        
+        # データ長統一
+        min_length = min(len(data_a), len(data_b), len(rho_a), len(rho_b))
+        if min_length < 10:
+            raise Lambda3Error("Insufficient data for Bayesian analysis")
+        
+        rho_a = rho_a[:min_length]
+        rho_b = rho_b[:min_length]
+        
+        with pm.Model() as model:
+            # 事前分布
+            beta_a_to_b = pm.Normal('beta_a_to_b', mu=0, sigma=1)
+            beta_b_to_a = pm.Normal('beta_b_to_a', mu=0, sigma=1)
+            alpha_sync = pm.Normal('alpha_sync', mu=0, sigma=0.5)
+            
+            # 相互作用効果
+            interaction_ab = beta_a_to_b * rho_a
+            interaction_ba = beta_b_to_a * rho_b
+            sync_effect = alpha_sync
+            
+            # 観測モデル（簡易版）
+            mu_a = interaction_ba + sync_effect
+            mu_b = interaction_ab + sync_effect
+            
+            sigma_a = pm.HalfNormal('sigma_a', sigma=1)
+            sigma_b = pm.HalfNormal('sigma_b', sigma=1)
+            
+            # 尤度
+            obs_a = pm.Normal('obs_a', mu=mu_a, sigma=sigma_a, observed=rho_a)
+            obs_b = pm.Normal('obs_b', mu=mu_b, sigma=sigma_b, observed=rho_b)
+            
+            # サンプリング
+            trace = pm.sample(1000, tune=500, cores=2, chains=2, return_inferencedata=True)
+        
+        return trace, model
+    
+    def _extract_bayesian_pairwise_coefficients(self, trace: Any) -> Dict[str, float]:
+        """ベイズペアワイズ係数抽出"""
+        
+        try:
+            summary = az.summary(trace)
+            
+            beta_a_to_b = summary.loc['beta_a_to_b', 'mean']
+            beta_b_to_a = summary.loc['beta_b_to_a', 'mean']
+            alpha_sync = summary.loc['alpha_sync', 'mean']
+            
+            coefficients = {
+                'causality_a_to_b': abs(beta_a_to_b),
+                'causality_b_to_a': abs(beta_b_to_a),
+                'synchronization': abs(alpha_sync),
+                'asymmetry': abs(beta_a_to_b - beta_b_to_a),
+                'a_to_b': abs(beta_a_to_b),
+                'b_to_a': abs(beta_b_to_a)
             }
-        }
-        
-        return coefficients
-    
-    def _calculate_comparative_statistics(self, pairwise_results: Dict) -> Dict[str, Any]:
-        """比較統計計算"""
-        if not pairwise_results:
-            return {}
-        
-        interaction_strengths = [r.calculate_bidirectional_coupling() for r in pairwise_results.values()]
-        asymmetry_scores = [r.get_asymmetry_score() for r in pairwise_results.values()]
-        quality_scores = [r.interaction_quality.get('overall_quality', 0) for r in pairwise_results.values()]
-        
-        return {
-            'interaction_strength_stats': {
-                'mean': float(np.mean(interaction_strengths)),
-                'std': float(np.std(interaction_strengths)),
-                'min': float(np.min(interaction_strengths)),
-                'max': float(np.max(interaction_strengths))
-            },
-            'asymmetry_stats': {
-                'mean': float(np.mean(asymmetry_scores)),
-                'std': float(np.std(asymmetry_scores)),
-                'min': float(np.min(asymmetry_scores)),
-                'max': float(np.max(asymmetry_scores))
-            },
-            'quality_stats': {
-                'mean': float(np.mean(quality_scores)),
-                'std': float(np.std(quality_scores)),
-                'min': float(np.min(quality_scores)),
-                'max': float(np.max(quality_scores))
+            
+            return coefficients
+            
+        except Exception as e:
+            print(f"Bayesian coefficient extraction failed: {e}")
+            return {
+                'causality_a_to_b': 0.0,
+                'causality_b_to_a': 0.0,
+                'synchronization': 0.0,
+                'asymmetry': 0.0,
+                'a_to_b': 0.0,
+                'b_to_a': 0.0
             }
-        }
-    
-    def _find_strongest_pair(self, pairwise_results: Dict) -> Tuple[str, float]:
-        """最強ペア検出"""
-        if not pairwise_results:
-            return "None", 0.0
-        
-        strongest_pair = max(
-            pairwise_results.items(),
-            key=lambda x: x[1].calculate_bidirectional_coupling()
-        )
-        
-        return strongest_pair[0], strongest_pair[1].calculate_bidirectional_coupling()
-    
-    def _find_strongest_connections(self, matrix: np.ndarray, names: List[str]) -> List[Tuple[str, str, float]]:
-        """最強接続検出"""
-        connections = []
-        n = len(names)
-        
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    connections.append((names[i], names[j], matrix[i, j]))
-        
-        connections.sort(key=lambda x: x[2], reverse=True)
-        return connections[:5]
-    
-    def _find_most_asymmetric_pairs(self, matrix: np.ndarray, names: List[str]) -> List[Tuple[str, str, float]]:
-        """最非対称ペア検出"""
-        asymmetric_pairs = []
-        n = len(names)
-        
-        for i in range(n):
-            for j in range(i+1, n):
-                asymmetry = abs(matrix[i, j] - matrix[j, i])
-                asymmetric_pairs.append((names[i], names[j], asymmetry))
-        
-        asymmetric_pairs.sort(key=lambda x: x[2], reverse=True)
-        return asymmetric_pairs[:5]
-    
-    def get_analysis_summary(self) -> Dict[str, Any]:
-        """解析履歴サマリー（JIT情報含む）"""
-        if not self.analysis_history:
-            return {"message": "No pairwise analyses performed yet"}
-        
-        total_analyses = len(self.analysis_history)
-        bayesian_analyses = sum(1 for h in self.analysis_history if h['method'] == 'bayesian')
-        jit_analyses = sum(1 for h in self.analysis_history if h.get('jit_optimized', False))
-        
-        # 統計計算
-        asymmetry_scores = [h['asymmetry_score'] for h in self.analysis_history]
-        coupling_strengths = [h['coupling_strength'] for h in self.analysis_history]
-        qualities = [h['quality'] for h in self.analysis_history]
-        
-        return {
-            'total_analyses': total_analyses,
-            'bayesian_ratio': bayesian_analyses / total_analyses,
-            'jit_optimization_ratio': jit_analyses / total_analyses,
-            'asymmetry_stats': {
-                'mean': float(np.mean(asymmetry_scores)),
-                'std': float(np.std(asymmetry_scores)),
-                'max': float(np.max(asymmetry_scores))
-            },
-            'coupling_stats': {
-                'mean': float(np.mean(coupling_strengths)),
-                'std': float(np.std(coupling_strengths)),
-                'max': float(np.max(coupling_strengths))
-            },
-            'quality_stats': {
-                'mean': float(np.mean(qualities)),
-                'std': float(np.std(qualities)),
-                'max': float(np.max(qualities))
-            },
-            'performance_summary': {
-                'jit_enabled': self.use_jit,
-                'jit_success_rate': jit_analyses / total_analyses if total_analyses > 0 else 0
-            },
-            'recent_analyses': self.analysis_history[-3:]
-        }
 
 # ==========================================================
-# CONVENIENCE FUNCTIONS（完全保持）
+# 便利関数
 # ==========================================================
 
 def analyze_pairwise_interaction(
-    features_a: StructuralTensorFeatures,
-    features_b: StructuralTensorFeatures,
-    config: Optional[L3PairwiseConfig] = None,
-    use_bayesian: bool = True
+    features_a: StructuralTensorProtocol,
+    features_b: StructuralTensorProtocol,
+    config: Optional[Any] = None,
+    use_bayesian: bool = False
 ) -> PairwiseInteractionResults:
     """
-    ペアワイズ相互作用解析の便利関数
+    ペアワイズ相互作用分析の便利関数
     
     Args:
-        features_a, features_b: 構造テンソル特徴量
-        config: ペアワイズ解析設定
-        use_bayesian: ベイズ推定使用フラグ
+        features_a: 系列Aの構造テンソル特徴量
+        features_b: 系列Bの構造テンソル特徴量
+        config: 設定オブジェクト
+        use_bayesian: ベイズ分析使用フラグ
         
     Returns:
-        PairwiseInteractionResults: ペアワイズ相互作用結果
+        PairwiseInteractionResults: ペアワイズ分析結果
     """
-    analyzer = PairwiseAnalyzer(config)
-    return analyzer.analyze_asymmetric_interaction(features_a, features_b, use_bayesian)
+    analyzer = PairwiseAnalyzer(config=config)
+    return analyzer.analyze_asymmetric_interaction(features_a, features_b, use_bayesian=use_bayesian)
 
 def compare_all_pairs(
-    features_dict: Dict[str, StructuralTensorFeatures],
-    config: Optional[L3PairwiseConfig] = None,
-    use_bayesian: bool = True
-) -> Dict[str, Any]:
+    features_dict: Dict[str, StructuralTensorProtocol],
+    config: Optional[Any] = None
+) -> Dict[str, PairwiseInteractionResults]:
     """
-    全ペア比較の便利関数
+    全ペア比較分析
     
     Args:
-        features_dict: {series_name: features} 辞書
-        config: ペアワイズ解析設定
-        use_bayesian: ベイズ推定使用フラグ
+        features_dict: 特徴量辞書
+        config: 設定オブジェクト
         
     Returns:
-        Dict: 複数ペア比較結果
+        Dict[str, PairwiseInteractionResults]: ペア別分析結果
     """
-    analyzer = PairwiseAnalyzer(config)
-    return analyzer.compare_multiple_pairs(features_dict, use_bayesian)
+    analyzer = PairwiseAnalyzer(config=config)
+    results = {}
+    
+    series_names = list(features_dict.keys())
+    
+    for i, name_a in enumerate(series_names):
+        for j, name_b in enumerate(series_names):
+            if i < j:  # 重複回避
+                pair_key = f"{name_a}_vs_{name_b}"
+                
+                try:
+                    result = analyzer.analyze_asymmetric_interaction(
+                        features_dict[name_a],
+                        features_dict[name_b]
+                    )
+                    results[pair_key] = result
+                except Exception as e:
+                    print(f"Pairwise analysis failed for {pair_key}: {e}")
+                    continue
+    
+    return results
+
+def analyze_network_structure(
+    features_dict: Dict[str, StructuralTensorProtocol],
+    config: Optional[Any] = None,
+    sync_threshold: float = 0.3
+) -> Dict[str, Any]:
+    """
+    ネットワーク構造分析
+    
+    Args:
+        features_dict: 特徴量辞書
+        config: 設定オブジェクト
+        sync_threshold: 同期閾値
+        
+    Returns:
+        Dict[str, Any]: ネットワーク分析結果
+    """
+    # 全ペア分析
+    pairwise_results = compare_all_pairs(features_dict, config)
+    
+    # ネットワーク構築
+    series_names = list(features_dict.keys())
+    n_series = len(series_names)
+    
+    # 同期行列構築
+    sync_matrix = np.zeros((n_series, n_series))
+    
+    for i, name_a in enumerate(series_names):
+        for j, name_b in enumerate(series_names):
+            if i != j:
+                pair_key = f"{name_a}_vs_{name_b}" if i < j else f"{name_b}_vs_{name_a}"
+                
+                if pair_key in pairwise_results:
+                    sync_strength = pairwise_results[pair_key].synchronization_strength
+                    sync_matrix[i, j] = sync_strength
+            else:
+                sync_matrix[i, j] = 1.0
+    
+    # ネットワーク統計
+    network_density = np.mean(sync_matrix[sync_matrix < 1.0])
+    max_sync = np.max(sync_matrix[sync_matrix < 1.0]) if np.any(sync_matrix < 1.0) else 0.0
+    
+    # 強結合ペア
+    strong_pairs = []
+    for i, name_a in enumerate(series_names):
+        for j, name_b in enumerate(series_names):
+            if i < j and sync_matrix[i, j] >= sync_threshold:
+                strong_pairs.append((name_a, name_b, sync_matrix[i, j]))
+    
+    return {
+        'synchronization_matrix': sync_matrix.tolist(),
+        'series_names': series_names,
+        'network_density': network_density,
+        'max_synchronization': max_sync,
+        'strong_pairs': strong_pairs,
+        'network_size': n_series,
+        'pairwise_results': pairwise_results
+    }
+
+# ==========================================================
+# モジュール情報
+# ==========================================================
+
+__all__ = [
+    'PairwiseInteractionResults',
+    'PairwiseAnalyzer',
+    'analyze_pairwise_interaction',
+    'compare_all_pairs',
+    'analyze_network_structure'
+]
+
+# ==========================================================
+# テスト関数
+# ==========================================================
+
+def test_pairwise_analysis():
+    """ペアワイズ分析のテスト"""
+    print("🧪 Testing Pairwise Analysis Implementation")
+    print("=" * 50)
+    
+    try:
+        # サンプルデータ生成
+        np.random.seed(42)
+        sample_data_a = np.cumsum(np.random.randn(80) * 0.1)
+        sample_data_b = np.cumsum(np.random.randn(80) * 0.12)
+        
+        # 構造テンソル特徴量作成（Protocol準拠）
+        if STRUCTURAL_TENSOR_AVAILABLE:
+            from ..core.structural_tensor import extract_lambda3_features
+            features_a = extract_lambda3_features(sample_data_a, series_name="Test_A")
+            features_b = extract_lambda3_features(sample_data_b, series_name="Test_B")
+        else:
+            # フォールバック：辞書形式
+            features_a = {
+                'data': sample_data_a,
+                'series_name': 'Test_A',
+                'delta_LambdaC_pos': np.random.randint(0, 2, 80).astype(np.float64),
+                'delta_LambdaC_neg': np.random.randint(0, 2, 80).astype(np.float64),
+                'rho_T': np.random.rand(80)
+            }
+            features_b = {
+                'data': sample_data_b,
+                'series_name': 'Test_B',
+                'delta_LambdaC_pos': np.random.randint(0, 2, 80).astype(np.float64),
+                'delta_LambdaC_neg': np.random.randint(0, 2, 80).astype(np.float64),
+                'rho_T': np.random.rand(80)
+            }
+        
+        # ペアワイズ分析実行
+        analyzer = PairwiseAnalyzer()
+        results = analyzer.analyze_asymmetric_interaction(features_a, features_b)
+        
+        print(f"✅ Analysis completed: {results.name_a} ↔ {results.name_b}")
+        print(f"✅ Synchronization strength: {results.synchronization_strength:.3f}")
+        print(f"✅ Causality A→B: {results.causality_a_to_b:.3f}")
+        print(f"✅ Causality B→A: {results.causality_b_to_a:.3f}")
+        print(f"✅ Asymmetry index: {results.asymmetry_index:.3f}")
+        print(f"✅ Dominant direction: {results.get_dominant_direction()}")
+        print(f"✅ Bidirectional coupling: {results.calculate_bidirectional_coupling():.3f}")
+        
+        # Protocol準拠確認
+        if TYPES_AVAILABLE:
+            print(f"✅ Protocol compatibility: {'OK' if hasattr(results, 'get_interaction_summary') else 'NG'}")
+        
+        print("🎯 Pairwise analysis test passed!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        return False
 
 if __name__ == "__main__":
-    print("Lambda³ Pairwise Analysis Module Test (JIT Compatible)")
-    print("=" * 60)
-    
-    # JIT機能テスト
-    if JIT_FUNCTIONS_AVAILABLE:
-        print("✅ JIT最適化関数利用可能")
-        
-        # 簡易テストデータ
-        test_data_a = np.cumsum(np.random.randn(100) * 0.1)
-        test_data_b = np.cumsum(np.random.randn(100) * 0.1) + test_data_a * 0.3
-        
-        # JIT同期計算テスト
-        try:
-            lags, sync_values, max_sync, optimal_lag = calculate_sync_profile_fixed(
-                test_data_a.astype(np.float64), 
-                test_data_b.astype(np.float64), 
-                5
-            )
-            print(f"✅ JIT同期計算成功: max_sync={max_sync:.4f}, optimal_lag={optimal_lag}")
-        except Exception as e:
-            print(f"❌ JIT同期計算エラー: {e}")
-        
-        # JIT正規化テスト
-        try:
-            normalized = normalize_array_fixed(test_data_a)
-            print(f"✅ JIT正規化成功: mean={np.mean(normalized):.4f}, std={np.std(normalized):.4f}")
-        except Exception as e:
-            print(f"❌ JIT正規化エラー: {e}")
-        
-        # JIT安全除算テスト
-        try:
-            result = safe_divide_fixed(1.0, 0.0, 999.0)
-            print(f"✅ JIT安全除算成功: 1/0 = {result} (default used)")
-        except Exception as e:
-            print(f"❌ JIT安全除算エラー: {e}")
-    else:
-        print("⚠️  JIT最適化関数利用不可 - フォールバック実装使用")
-    
-    print("Pairwise analysis module loaded successfully!")
-    print("Ready for Lambda³ asymmetric interaction analysis with JIT optimization.")
+    test_pairwise_analysis()
