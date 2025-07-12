@@ -122,7 +122,6 @@ def calculate_local_std(data: np.ndarray, window: int = 5) -> np.ndarray:
 # ==========================================================
 # HIERARCHICAL DETECTION - 階層的∆ΛC検出
 # ==========================================================
-
 @njit(**JIT_BASE_OPTIONS)
 def detect_local_global_jumps(
     data: np.ndarray,
@@ -133,19 +132,27 @@ def detect_local_global_jumps(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     ローカル・グローバル構造変化の階層的検出
+    
+    Lambda³理論: 構造変化には階層性がある
+    - ローカル: 短期的な構造テンソル変化（高頻度∆ΛC）
+    - グローバル: 長期的な構造テンソル変化（低頻度∆ΛC）
+    
+    Returns:
+        local_pos, local_neg, global_pos, global_neg (全てfloat64)
     """
     n = len(data)
     diff = np.zeros(n, dtype=np.float64)
-    
+    diff[0] = 0
     for i in range(1, n):
         diff[i] = data[i] - data[i-1]
     
+    # 初期化（float64保証）
     local_pos = np.zeros(n, dtype=np.float64)
     local_neg = np.zeros(n, dtype=np.float64)
     global_pos = np.zeros(n, dtype=np.float64)
     global_neg = np.zeros(n, dtype=np.float64)
     
-    # ローカル基準での判定
+    # ローカル基準での判定（適応的閾値）
     for i in range(n):
         local_start = max(0, i - local_window)
         local_end = min(n, i + local_window + 1)
@@ -158,7 +165,7 @@ def detect_local_global_jumps(
             elif diff[i] < -local_threshold:
                 local_neg[i] = 1.0
     
-    # グローバル基準での判定
+    # グローバル基準での判定（固定閾値）
     global_threshold = np.percentile(np.abs(diff), global_percentile)
     
     for i in range(n):
