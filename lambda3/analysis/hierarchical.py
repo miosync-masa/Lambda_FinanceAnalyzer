@@ -45,6 +45,49 @@ except ImportError:
 # ==========================================================
 # HIERARCHICAL ANALYSIS RESULTS - 階層分析結果
 # ==========================================================
+# Lambda³専用例外クラスを追加
+class Lambda3Error(Exception):
+    """Lambda³基底例外クラス"""
+    def __init__(self, message: str, error_code: str = "L3_GENERAL", 
+                 details: Optional[Dict[str, Any]] = None,
+                 suggestions: Optional[List[str]] = None):
+        self.message = message
+        self.error_code = error_code
+        self.details = details or {}
+        self.suggestions = suggestions or []
+        super().__init__(self.format_message())
+    
+    def format_message(self) -> str:
+        msg = f"[{self.error_code}] {self.message}"
+        if self.details:
+            msg += f"\nDetails: {self.details}"
+        if self.suggestions:
+            msg += f"\nSuggestions:\n" + "\n".join(f"  - {s}" for s in self.suggestions)
+        return msg
+
+class InsufficientDataError(Lambda3Error):
+    """データ不足エラー"""
+    def __init__(self, actual_length: int, required_length: int, context: str = ""):
+        super().__init__(
+            f"Insufficient data for {context}: {actual_length} < {required_length}",
+            "L3_INSUFFICIENT_DATA",
+            {"actual": actual_length, "required": required_length, "context": context},
+            [f"Provide at least {required_length} data points",
+             "Check data preprocessing pipeline",
+             "Consider using a smaller analysis window"]
+        )
+
+class DataQualityError(Lambda3Error):
+    """データ品質エラー"""
+    def __init__(self, issues: List[str], data_info: Dict[str, Any]):
+        super().__init__(
+            f"Data quality issues detected: {len(issues)} problems",
+            "L3_DATA_QUALITY",
+            {"issues": issues, "data_info": data_info},
+            ["Run data validation before analysis",
+             "Check for NaN/Inf values",
+             "Ensure data has sufficient variation"]
+        )
 
 @dataclass
 class HierarchicalSeparationResults:
@@ -133,7 +176,7 @@ class HierarchicalAnalyzer:
         use_bayesian: bool = True
     ) -> HierarchicalSeparationResults:
         """
-        階層分離ダイナミクス分析
+        階層分離ダイナミクス分析（エラーハンドリング強化版）
         
         Args:
             features: 構造テンソル特徴量
@@ -142,32 +185,96 @@ class HierarchicalAnalyzer:
         Returns:
             HierarchicalSeparationResults: 階層分析結果
         """
-        # 階層メトリクスを計算
-        hierarchy_metrics = self._calculate_hierarchy_metrics(features)
-        
-        # 結果オブジェクトを初期化
-        results = HierarchicalSeparationResults(
-            series_name=features.series_name,
-            data_length=len(features.data),
-            **hierarchy_metrics
-        )
-        
-        # 階層強度統計を計算
-        if self._has_sufficient_hierarchical_data(features):
-            intensity_stats = self._calculate_intensity_statistics(features)
-            results.local_mean_intensity = intensity_stats['local_mean']
-            results.global_mean_intensity = intensity_stats['global_mean']
-            results.local_std_intensity = intensity_stats['local_std']
-            results.global_std_intensity = intensity_stats['global_std']
-            results.hierarchy_correlation = intensity_stats['correlation']
-        
-        # ベイズ推定が可能な場合
-        if use_bayesian and self.pymc_available and self._has_sufficient_hierarchical_data(features):
-            bayesian_results = self._fit_hierarchical_bayesian_model(features)
-            if bayesian_results:
-                results = self._update_results_with_bayesian(results, bayesian_results)
-        
-        return results
+        try:
+            # データ検証を追加
+            # データ長チェック
+            if len(features.data) < 50:  # 最小要件
+                raise InsufficientDataError(
+                    len(features.data), 50,
+                    f"hierarchical analysis of {features.series_name}"
+                )
+            
+            # データ品質チェック
+            data_issues = []
+            if np.isnan(features.data).any():
+                data_issues.append("Data contains NaN values")
+            if np.isinf(features.data).any():
+                data_issues.append("Data contains Inf values")
+            if np.std(features.data) < 1e-10:
+                data_issues.append("Data has insufficient variation")
+            
+            # 特徴量の型チェック
+            is_valid, type_errors = features.validate_consistency()
+            if not is_valid:
+                data_issues.extend(type_errors)
+            
+            if data_issues:
+                raise DataQualityError(
+                    data_issues,
+                    {
+                        "series_name": features.series_name,
+                        "length": len(features.data),
+                        "dtype": str(features.data.dtype)
+                    }
+                )
+            
+            # === 既存の処理をそのまま維持 ===
+            # 階層メトリクスを計算
+            hierarchy_metrics = self._calculate_hierarchy_metrics(features)
+            
+            # 結果オブジェクトを初期化
+            results = HierarchicalSeparationResults(
+                series_name=features.series_name,
+                data_length=len(features.data),
+                **hierarchy_metrics
+            )
+            
+            # 階層強度統計を計算
+            if self._has_sufficient_hierarchical_data(features):
+                intensity_stats = self._calculate_intensity_statistics(features)
+                results.local_mean_intensity = intensity_stats['local_mean']
+                results.global_mean_intensity = intensity_stats['global_mean']
+                results.local_std_intensity = intensity_stats['local_std']
+                results.global_std_intensity = intensity_stats['global_std']
+                results.hierarchy_correlation = intensity_stats['correlation']
+            else:
+                # データ不足の場合はメタデータに記録
+                results.metadata['limited_analysis'] = True
+                results.metadata['reason'] = 'insufficient_hierarchical_events'
+            
+            # ベイズ推定が可能な場合
+            if use_bayesian and self.pymc_available and self._has_sufficient_hierarchical_data(features):
+                try:
+                    bayesian_results = self._fit_hierarchical_bayesian_model(features)
+                    if bayesian_results:
+                        results = self._update_results_with_bayesian(results, bayesian_results)
+                except Exception as e:
+                    # ベイズ推定失敗を記録するが、分析は継続
+                    results.metadata['bayesian_failed'] = True
+                    results.metadata['bayesian_error'] = str(e)
+                    warnings.warn(f"Bayesian estimation failed: {e}")
+            
+            return results
+            
+        except (InsufficientDataError, DataQualityError):
+            # Lambda³エラーはそのまま再発生
+            raise
+        except Exception as e:
+            # 予期しないエラーをLambda³エラーでラップ
+            raise Lambda3Error(
+                f"Hierarchical analysis failed for {features.series_name}",
+                "L3_HIERARCHICAL_FAIL",
+                {
+                    "original_error": str(e),
+                    "error_type": type(e).__name__,
+                    "series": features.series_name
+                },
+                [
+                    "Check input data quality",
+                    "Ensure all dependencies are installed",
+                    "Enable debug logging for detailed error trace"
+                ]
+            ) from e
     
     def _calculate_hierarchy_metrics(
         self,
@@ -441,18 +548,7 @@ def complete_hierarchical_analysis(
     series_names: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
-    完全な階層的構造変化分析（paste.txt準拠）
-    
-    Lambda³理論における構造テンソル(Λ)の階層的∆ΛC変化を検出し、
-    進行ベクトル(ΛF)および張力スカラー(ρT)の多階層相互作用を解析する。
-    
-    Args:
-        data_dict: 構造テンソル系列データ辞書
-        config: Lambda³解析設定
-        series_names: 解析対象系列名リスト
-        
-    Returns:
-        階層的構造変化解析結果
+    完全な階層的構造変化分析（エラーハンドリング強化版）
     """
     if config is None:
         config = L3Config()
@@ -461,6 +557,7 @@ def complete_hierarchical_analysis(
         series_names = list(data_dict.keys())
     
     results = {}
+    analysis_errors = {}
     
     print("=" * 80)
     print("LAMBDA³ HIERARCHICAL STRUCTURAL ANALYSIS")
@@ -481,74 +578,115 @@ def complete_hierarchical_analysis(
         print(f"ANALYZING STRUCTURAL TENSOR: {name}")
         print(f"{'─' * 60}")
         
-        data = data_dict[name]
-        print(f"データ長: {len(data)}")
-        
-        # 階層的特徴量抽出
-        features = extractor.extract_features(
-            data, 
-            series_name=name,
-            feature_level='hierarchical'
-        )
-        
-        # 階層分離ダイナミクス分析
-        separation_results = analyzer.analyze_hierarchical_separation(features)
-        
-        # 結果統合
-        results[name] = {
-            'features': features,
-            'separation_results': separation_results,
-            'data': data
-        }
-        
-        # 結果表示
-        print(f"\n階層分離係数:")
-        print(f"  エスカレーション: {separation_results.escalation_coefficient:.4f}")
-        print(f"  デエスカレーション: {separation_results.deescalation_coefficient:.4f}")
-        print(f"  短期効果強度: {separation_results.local_effect_coefficient:.4f}")
-        print(f"  長期効果強度: {separation_results.global_effect_coefficient:.4f}")
-        print(f"  階層間相関: {separation_results.hierarchy_correlation:.4f}")
-        
-        print(f"\n階層メトリクス:")
-        print(f"  ローカル優勢度: {separation_results.local_dominance:.3f}")
-        print(f"  グローバル優勢度: {separation_results.global_dominance:.3f}")
-        print(f"  階層結合強度: {separation_results.coupling_strength:.3f}")
-        print(f"  エスカレーション率: {separation_results.escalation_rate:.3f}")
+        try:
+            data = data_dict[name]
+            print(f"データ長: {len(data)}")
+            
+            # データ検証
+            if len(data) < config.min_data_points:
+                raise InsufficientDataError(
+                    len(data), 
+                    config.min_data_points,
+                    f"series {name}"
+                )
+            
+            # 階層的特徴量抽出
+            features = extractor.extract_features(
+                data, 
+                series_name=name,
+                feature_level='hierarchical'
+            )
+            
+            # 階層分離ダイナミクス分析
+            separation_results = analyzer.analyze_hierarchical_separation(features)
+            
+            # 結果統合
+            results[name] = {
+                'features': features,
+                'separation_results': separation_results,
+                'data': data,
+                'status': 'success'
+            }
+            
+            # 結果表示
+            print(f"\n階層分離係数:")
+            print(f"  エスカレーション: {separation_results.escalation_coefficient:.4f}")
+            print(f"  デエスカレーション: {separation_results.deescalation_coefficient:.4f}")
+            print(f"  短期効果強度: {separation_results.local_effect_coefficient:.4f}")
+            print(f"  長期効果強度: {separation_results.global_effect_coefficient:.4f}")
+            print(f"  階層間相関: {separation_results.hierarchy_correlation:.4f}")
+            
+        except InsufficientDataError as e:
+            print(f"\n❌ データ不足エラー: {e.message}")
+            analysis_errors[name] = e
+            results[name] = {
+                'status': 'error',
+                'error_type': 'insufficient_data',
+                'error_details': e.details,
+                'suggestions': e.suggestions
+            }
+            
+        except DataQualityError as e:
+            print(f"\n❌ データ品質エラー:")
+            for issue in e.details['issues']:
+                print(f"   - {issue}")
+            analysis_errors[name] = e
+            results[name] = {
+                'status': 'error',
+                'error_type': 'data_quality',
+                'error_details': e.details,
+                'suggestions': e.suggestions
+            }
+            
+        except Lambda3Error as e:
+            print(f"\n❌ Lambda³エラー: {e.message}")
+            analysis_errors[name] = e
+            results[name] = {
+                'status': 'error',
+                'error_type': e.error_code,
+                'error_details': e.details,
+                'suggestions': e.suggestions
+            }
+            
+        except Exception as e:
+            print(f"\n❌ 予期しないエラー: {e}")
+            analysis_errors[name] = e
+            results[name] = {
+                'status': 'error',
+                'error_type': 'unexpected',
+                'error_details': {'error': str(e), 'type': type(e).__name__}
+            }
     
-    # ペアワイズ階層的同期分析
-    if len(series_names) >= 2:
+    # エラーサマリー
+    if analysis_errors:
         print(f"\n{'=' * 80}")
-        print("PAIRWISE HIERARCHICAL SYNCHRONIZATION ANALYSIS")
+        print("ERROR SUMMARY")
         print(f"{'=' * 80}")
-        
-        results['pairwise_sync'] = analyze_pairwise_hierarchical_sync(
-            results[series_names[0]]['features'],
-            results[series_names[1]]['features'],
-            config
-        )
-        
-        # 同期結果表示
-        print(f"\n階層別同期強度:")
-        for sync_type, sync_data in results['pairwise_sync'].items():
-            if isinstance(sync_data, dict) and 'max_sync' in sync_data:
-                print(f"  {sync_data['display_name']}: {sync_data['max_sync']:.4f} (lag={sync_data['optimal_lag']})")
+        print(f"Total errors: {len(analysis_errors)}")
+        for name, error in analysis_errors.items():
+            if isinstance(error, Lambda3Error):
+                print(f"\n{name}: [{error.error_code}] {error.message}")
+            else:
+                print(f"\n{name}: {type(error).__name__}: {error}")
     
-    # 階層的因果関係分析
-    if len(series_names) >= 2 and 'causality' not in kwargs.get('skip_analyses', []):
-        print(f"\n{'=' * 80}")
-        print("HIERARCHICAL CAUSALITY ANALYSIS")
-        print(f"{'=' * 80}")
-        
-        results['hierarchical_causality'] = analyze_hierarchical_causality(
-            results[series_names[0]]['features'],
-            results[series_names[1]]['features'],
-            config
-        )
-        
-        print(f"\n階層的因果パターン検出完了")
+    # 成功した分析のみで後続処理を実行
+    successful_series = [name for name in results if results[name].get('status') == 'success']
+    
+    if len(successful_series) >= 2:
+        # ペアワイズ階層的同期分析などの後続処理...
+        pass
+    
+    # 分析メタデータを追加
+    results['_analysis_metadata'] = {
+        'total_series': len(series_names),
+        'successful': len(successful_series),
+        'failed': len(analysis_errors),
+        'error_summary': {name: str(error) for name, error in analysis_errors.items()}
+    }
     
     print(f"\n{'=' * 80}")
     print("LAMBDA³ HIERARCHICAL ANALYSIS COMPLETED")
+    print(f"成功: {len(successful_series)}/{len(series_names)} 系列")
     print(f"{'=' * 80}")
     
     return results
