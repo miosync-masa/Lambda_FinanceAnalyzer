@@ -319,8 +319,17 @@ def test_jit_functions():
         
         # 2. 階層的検出テスト
         print("\n2️⃣ Testing hierarchical detection...")
-        local_pos, local_neg, global_pos, global_neg = detect_local_global_jumps(test_data)
-        print(f"   ✅ Local: {np.sum(local_pos + local_neg):.0f}, Global: {np.sum(global_pos + global_neg):.0f}")
+        local_pos, local_neg, global_pos, global_neg = detect_local_global_jumps(
+            test_data,
+            local_window=5,
+            global_window=20,
+            local_percentile=85.0,
+            global_percentile=92.5
+        )
+        print(f"   ✅ Local: {np.sum(local_pos + local_neg):.0f} events")
+        print(f"   ✅ Global: {np.sum(global_pos + global_neg):.0f} events")
+        print(f"   ✅ Local positive: {np.sum(local_pos):.0f}, negative: {np.sum(local_neg):.0f}")
+        print(f"   ✅ Global positive: {np.sum(global_pos):.0f}, negative: {np.sum(global_neg):.0f}")
         
         # 3. 張力スカラーテスト
         print("\n3️⃣ Testing tension scalar...")
