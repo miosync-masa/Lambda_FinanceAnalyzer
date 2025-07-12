@@ -616,7 +616,11 @@ class PairwiseAnalyzer:
             return self._calculate_sync_profile_python(data_a, data_b)
     
     def _calculate_sync_profile_python(self, data_a: np.ndarray, data_b: np.ndarray) -> Dict[str, float]:
-        """Python同期プロファイル計算"""
+        """Python同期プロファイル計算（修正版）"""
+        
+        # 差分計算でトレンド除去
+        diff_a = np.diff(data_a) if len(data_a) > 1 else data_a
+        diff_b = np.diff(data_b) if len(data_b) > 1 else data_b
         
         lag_window = getattr(self.config, 'lag_window', 10)
         sync_profile = {}
@@ -625,17 +629,17 @@ class PairwiseAnalyzer:
         
         for lag in range(-lag_window, lag_window + 1):
             if lag < 0:
-                if -lag < len(data_a):
-                    sync = np.corrcoef(data_a[-lag:], data_b[:lag])[0, 1] if len(data_a[-lag:]) > 1 else 0.0
+                if -lag < len(diff_a):
+                    sync = np.corrcoef(diff_a[-lag:], diff_b[:lag])[0, 1] if len(diff_a[-lag:]) > 1 else 0.0
                 else:
                     sync = 0.0
             elif lag > 0:
-                if lag < len(data_b):
-                    sync = np.corrcoef(data_a[:-lag], data_b[lag:])[0, 1] if len(data_a[:-lag]) > 1 else 0.0
+                if lag < len(diff_b):
+                    sync = np.corrcoef(diff_a[:-lag], diff_b[lag:])[0, 1] if len(diff_a[:-lag]) > 1 else 0.0
                 else:
                     sync = 0.0
             else:
-                sync = np.corrcoef(data_a, data_b)[0, 1] if len(data_a) > 1 else 0.0
+                sync = np.corrcoef(diff_a, diff_b)[0, 1] if len(diff_a) > 1 else 0.0
             
             if np.isnan(sync):
                 sync = 0.0
@@ -677,22 +681,38 @@ class PairwiseAnalyzer:
             'b_to_a': integrated_b_to_a
         }
     
-    def _calculate_lagged_correlation(self, series_cause: np.ndarray, series_effect: np.ndarray, direction: str = 'forward') -> float:
-        """遅延相関計算"""
+    def _calculate_lagged_correlation(
+        self, 
+        data_a: np.ndarray, 
+        data_b: np.ndarray, 
+        direction: str = 'forward',
+        max_lag: int = 5
+    ) -> float:
+        """遅延相関計算（修正版）"""
         
-        max_causality = 0.0
+        # 差分でトレンド除去
+        diff_a = np.diff(data_a) if len(data_a) > 1 else data_a
+        diff_b = np.diff(data_b) if len(data_b) > 1 else data_b
         
-        for lag in range(1, min(10, len(series_cause) // 10)):
-            if direction == 'forward' and lag < len(series_cause):
-                cause_past = series_cause[:-lag]
-                effect_future = series_effect[lag:]
-                
-                if len(cause_past) > 1 and len(effect_future) > 1:
-                    correlation = np.corrcoef(cause_past, effect_future)[0, 1]
-                    if not np.isnan(correlation):
-                        max_causality = max(max_causality, abs(correlation))
+        if len(diff_a) < 2 or len(diff_b) < 2:
+            return 0.0
         
-        return max_causality
+        max_corr = 0.0
+        
+        for lag in range(1, min(max_lag + 1, len(diff_a) // 2)):
+            if direction == 'forward':
+                # A → B 方向
+                if lag < len(diff_b):
+                    corr = np.corrcoef(diff_a[:-lag], diff_b[lag:])[0, 1]
+            else:
+                # B → A 方向
+                if lag < len(diff_a):
+                    corr = np.corrcoef(diff_b[:-lag], diff_a[lag:])[0, 1]
+            
+            if not np.isnan(corr):
+                max_corr = max(max_corr, abs(corr))
+        
+        return max_corr
     
     def _calculate_structure_causality(
         self,
