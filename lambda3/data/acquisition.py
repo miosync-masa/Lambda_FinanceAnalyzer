@@ -834,3 +834,20 @@ if __name__ == "__main__":
         print(f"   {category}: {data.shape}")
     
     print("\n✅ Data acquisition system test completed!")
+
+# ==========================================================
+# MODULE EXPORTS
+# ==========================================================
+
+__all__ = [
+    # メインクラス
+    'Lambda3DataAcquisition',
+    
+    # 設定クラス
+    'DataSourceConfig',
+    'DataAcquisitionConfig',
+    
+    # 便利関数
+    'quick_financial_data_fetch',
+    'setup_data_acquisition_config',
+]
