@@ -1,7 +1,7 @@
 # ==========================================================
 # pyproject.toml - Lambda³ Finance Analyzer Modern Package Configuration
 # 
-# Author: Masamichi Iizumi (Miosync, Inc.)  
+# Author: Mamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
 # 革新ポイント: PEP 518/621準拠の現代的パッケージ設定
@@ -453,7 +453,7 @@ extensions = [
 
 [tool.jupyter-book]
 title = "Lambda³ Theory Documentation"
-author = "Masamichi Iizumi"
+author = "Mamichi Iizumi"
 logo = "docs/static/lambda3_logo.png"
 execute_notebooks = "force"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
@@ -514,9 +514,3 @@ commands = sphinx-build -W -b html docs/source docs/build
 # ==========================================================
 # METADATA - メタデータ
 # ==========================================================
-
-[project.entry-points."lambda3.plugins"]
-# プラグインシステム（将来の拡張用）
-core = "lambda3.core:plugin"
-analysis = "lambda3.analysis:plugin" 
-visualization = "lambda3.visualization:plugin"
