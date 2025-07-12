@@ -555,7 +555,11 @@ class StructuralTensorExtractor:
             diff = safe_diff(data)
             
             # 2. 構造変化検出
-            threshold = safe_percentile(np.abs(diff), self.config.threshold_percentile, exclude_zeros=True)
+            threshold_percentile = getattr(self.config, 'threshold_percentile', 95.0)
+            if hasattr(self.config, 'base') and hasattr(self.config.base, 'threshold_percentile'):
+                threshold_percentile = self.config.base.threshold_percentile
+            
+            threshold = safe_percentile(np.abs(diff), threshold_percentile, exclude_zeros=True)
             delta_pos = (diff > threshold).astype(np.float64)
             delta_neg = (diff < -threshold).astype(np.float64)
             
