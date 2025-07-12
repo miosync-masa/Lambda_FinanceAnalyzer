@@ -1,133 +1,86 @@
 # ==========================================================
-# lambda3/__init__.py (修正版)
-# Lambda³ Main Module - 循環インポート完全解決版
+# lambda3/__init__.py
+# Lambda³ Finance Analyzer Package Initialization (修正版)
+#
+# Author: Masamichi Iizumi (Miosync, Inc.)
+# License: MIT
 # ==========================================================
 
 """
-Lambda³ (Lambda Cubed) Analytics Package - 修正版
+Lambda³ Finance Analyzer - 構造テンソル金融分析
 
-構造テンソル(Λ)理論に基づく高度時系列解析フレームワーク
-
-修正点:
-- 段階的インポート戦略による循環依存解消
-- Protocol準拠による型安全性確保  
-- JIT最適化の段階的有効化
-- エラー耐性の向上
-- 依存関係の明確化
-
-Author: Masamichi Iizumi (Miosync, Inc.)
-License: MIT
+時間非依存の構造空間における金融時系列分析のための
+革新的な数学的フレームワーク。
 """
 
-__version__ = "1.0.0"
+__version__ = "0.2.0"
 __author__ = "Masamichi Iizumi"
-__email__ = "m.iizumi@miosync.email"
 __license__ = "MIT"
-__description__ = "Lambda³ Theory: Structural Tensor Analytics for Time Series"
 
 import warnings
-import sys
-from typing import Union, Dict, Any, List, Optional
+from typing import Dict, Any, Optional, Union, List
 import numpy as np
 
-# ==========================================================
-# 段階的インポート戦略（循環依存回避）
-# ==========================================================
-
-# インポートエラー記録
-_IMPORT_ERRORS = []
+# モジュール状態追跡
 _MODULE_STATUS = {}
+_IMPORT_ERRORS = []
 
-print("🚀 Lambda³ Analytics Framework - Initializing...")
+print("Lambda³ Finance Analyzer v" + __version__)
+print("Initializing core modules...")
 
 # ==========================================================
-# Stage 1: 共通型定義（最優先）
-# ==========================================================
-
-try:
-    from .core.types import (
-        StructuralTensorProtocol,
-        HierarchicalResultProtocol,
-        PairwiseResultProtocol,
-        ComprehensiveResultProtocol,
-        ConfigProtocol,
-        AnalyzerProtocol,
-        AnalysisMode,
-        FeatureLevel,
-        QualityLevel,
-        Lambda3Error,
-        StructuralTensorError,
-        is_structural_tensor_compatible,
-        ensure_float_array,
-        ensure_series_name
-    )
-    _MODULE_STATUS['types'] = True
-    print("   ✅ Types system loaded")
-except ImportError as e:
-    _MODULE_STATUS['types'] = False
-    _IMPORT_ERRORS.append(f"Types: {e}")
-    warnings.warn(f"Lambda³ types not available: {e}")
-    # フォールバック型定義
-    StructuralTensorProtocol = Any
-    HierarchicalResultProtocol = Any
-    PairwiseResultProtocol = Any
-
-# ==========================================================  
-# Stage 2: 核心設定システム
+# Stage 1: Configuration System
 # ==========================================================
 
 try:
     from .core.config import (
-        L3BaseConfig,
-        L3JITConfig,
-        L3BayesianConfig,
-        L3HierarchicalConfig,
-        L3PairwiseConfig,
-        L3VisualizationConfig,
-        L3ComprehensiveConfig,
-        create_default_config,
-        create_financial_config,
-        create_rapid_config,
-        create_research_config,
-        get_config,
-        validate_config
+        L3Config,
+        L3FinancialConfig,
+        L3ResearchConfig,
+        L3RapidConfig,
+        L3ConfigFactory,
+        create_config,
+        DEFAULT_CONFIG,
+        FINANCIAL_CONFIG,
+        RESEARCH_CONFIG,
+        RAPID_CONFIG
     )
     _MODULE_STATUS['config'] = True
     print("   ✅ Configuration system loaded")
 except ImportError as e:
     _MODULE_STATUS['config'] = False
     _IMPORT_ERRORS.append(f"Config: {e}")
-    warnings.warn(f"Configuration system not available: {e}")
+    warnings.warn(f"Configuration module not available: {e}")
 
 # ==========================================================
-# Stage 3: JIT最適化関数（核心機能）
+# Stage 2: JIT Functions (Core Computational Engine)
 # ==========================================================
 
 try:
     from .core.jit_functions import (
-        test_jit_functions_fixed,
-        benchmark_performance_fixed,
-        extract_lambda3_features_jit,
-        calculate_diff_and_threshold_fixed,
-        detect_structural_jumps_fixed,
-        calculate_tension_scalar_fixed,
-        detect_hierarchical_jumps_fixed,
-        calculate_sync_profile_fixed
+        calculate_diff_and_threshold,
+        detect_jumps,
+        calculate_local_std,
+        calculate_rho_t,
+        detect_local_global_jumps,
+        sync_rate_at_lag,
+        calculate_sync_profile_jit,
+        calc_lambda3_features_v2,
+        detect_phase_coupling,
+        test_jit_functions,
+        run_jit_benchmark
     )
     _MODULE_STATUS['jit_functions'] = True
+    JIT_FUNCTIONS_AVAILABLE = True
     print("   ✅ JIT optimization loaded")
-    
-    # 便利エイリアス
-    test_jit_functions = test_jit_functions_fixed
-    run_jit_benchmark = benchmark_performance_fixed
-    
 except ImportError as e:
     _MODULE_STATUS['jit_functions'] = False
+    JIT_FUNCTIONS_AVAILABLE = False
     _IMPORT_ERRORS.append(f"JIT functions: {e}")
     warnings.warn(f"JIT functions not available: {e}")
 
 # ==========================================================
-# Stage 4: 構造テンソル演算（コア）
+# Stage 3: Structural Tensor (Core Theory Implementation)
 # ==========================================================
 
 try:
@@ -145,14 +98,16 @@ except ImportError as e:
     warnings.warn(f"Structural tensor module not available: {e}")
 
 # ==========================================================
-# Stage 5: 分析モジュール（コア依存）
+# Stage 4: Analysis Modules
 # ==========================================================
 
+# Hierarchical Analysis
 try:
     if _MODULE_STATUS.get('structural_tensor', False):
         from .analysis.hierarchical import (
             HierarchicalAnalyzer,
             HierarchicalSeparationResults,
+            complete_hierarchical_analysis,
             analyze_hierarchical_structure
         )
         _MODULE_STATUS['hierarchical_analysis'] = True
@@ -164,6 +119,7 @@ except ImportError as e:
     _IMPORT_ERRORS.append(f"Hierarchical analysis: {e}")
     warnings.warn(f"Hierarchical analysis not available: {e}")
 
+# Pairwise Analysis
 try:
     if _MODULE_STATUS.get('structural_tensor', False):
         from .analysis.pairwise import (
@@ -181,498 +137,284 @@ except ImportError as e:
     warnings.warn(f"Pairwise analysis not available: {e}")
 
 # ==========================================================
-# Stage 6: 可視化モジュール（オプション）
+# Stage 5: Financial Analysis (Optional)
 # ==========================================================
 
 try:
-    from .visualization.base import (
-        Lambda3BaseVisualizer,
-        TimeSeriesVisualizer,
-        InteractionVisualizer,
-        HierarchicalVisualizer,
-        apply_lambda3_style,
-        create_lambda3_visualizer
+    from .financial import (
+        analyze_financial_markets,
+        detect_financial_crises,
+        FinancialAnalysisResults
+    )
+    _MODULE_STATUS['financial'] = True
+    print("   ✅ Financial analysis loaded")
+except ImportError as e:
+    _MODULE_STATUS['financial'] = False
+    _IMPORT_ERRORS.append(f"Financial: {e}")
+    # Financial is optional, so no warning
+
+# ==========================================================
+# Stage 6: Data Acquisition (Optional)
+# ==========================================================
+
+try:
+    from .data.acquisition import (
+        DataAcquisitionConfig,
+        fetch_market_data,
+        load_financial_data
+    )
+    _MODULE_STATUS['data_acquisition'] = True
+    print("   ✅ Data acquisition loaded")
+except ImportError as e:
+    _MODULE_STATUS['data_acquisition'] = False
+    _IMPORT_ERRORS.append(f"Data acquisition: {e}")
+    # Data acquisition is optional
+
+# ==========================================================
+# Stage 7: Visualization (Optional)
+# ==========================================================
+
+try:
+    from .visualization import (
+        plot_structural_tensor_features,
+        plot_hierarchical_separation,
+        plot_pairwise_interaction,
+        create_analysis_dashboard
     )
     _MODULE_STATUS['visualization'] = True
-    print("   ✅ Visualization modules loaded")
+    print("   ✅ Visualization loaded")
 except ImportError as e:
     _MODULE_STATUS['visualization'] = False
     _IMPORT_ERRORS.append(f"Visualization: {e}")
-    warnings.warn(f"Visualization modules not available: {e}")
+    # Visualization is optional
 
 # ==========================================================
-# Stage 7: パイプライン（全モジュール依存）
+# High-Level API
 # ==========================================================
 
-try:
-    # 必要モジュールの確認
-    required_modules = ['types', 'structural_tensor']
-    if all(_MODULE_STATUS.get(mod, False) for mod in required_modules):
-        from .pipelines.comprehensive import (
-            Lambda3ComprehensivePipeline,
-            Lambda3ComprehensiveResults,
-            run_lambda3_analysis,
-            create_analysis_report
-        )
-        _MODULE_STATUS['pipeline'] = True
-        print("   ✅ Comprehensive pipeline loaded")
-    else:
-        missing = [mod for mod in required_modules if not _MODULE_STATUS.get(mod, False)]
-        raise ImportError(f"Required modules missing: {missing}")
-except ImportError as e:
-    _MODULE_STATUS['pipeline'] = False
-    _IMPORT_ERRORS.append(f"Pipeline: {e}")
-    warnings.warn(f"Comprehensive pipeline not available: {e}")
-
-# ==========================================================
-# 便利関数（安全版）
-# ==========================================================
-
-def analyze(data: Union[Dict[str, np.ndarray], np.ndarray], 
-           analysis_type: str = 'comprehensive',
-           config: Optional[Any] = None,
-           **kwargs) -> Any:
+def analyze(
+    data: Union[np.ndarray, Dict[str, np.ndarray], List[float]],
+    analysis_type: str = 'comprehensive',
+    config: Optional[L3Config] = None,
+    **kwargs
+) -> Any:
     """
-    Lambda³解析の便利関数（安全版）
+    Lambda³分析の統一インターフェース
     
     Args:
-        data: 入力データ（辞書またはnumpy配列）
-        analysis_type: 解析タイプ ('structural', 'hierarchical', 'pairwise', 'comprehensive', 'financial')
+        data: 分析対象データ（単一系列または複数系列）
+        analysis_type: 分析タイプ
+            - 'structural': 構造テンソル特徴量のみ
+            - 'hierarchical': 階層的構造分析
+            - 'pairwise': ペアワイズ非対称分析
+            - 'comprehensive': 包括的分析
+            - 'financial': 金融市場分析
+            - 'rapid': 高速分析
         config: 設定オブジェクト
         **kwargs: 追加パラメータ
         
     Returns:
-        解析結果オブジェクト
+        分析結果オブジェクト
     """
     if not _MODULE_STATUS.get('structural_tensor', False):
         raise ImportError("Structural tensor module required for analysis")
     
-    # データの前処理
-    if isinstance(data, np.ndarray):
+    # デフォルト設定
+    if config is None:
+        if analysis_type == 'financial':
+            config = FINANCIAL_CONFIG if 'config' in _MODULE_STATUS else L3Config()
+        elif analysis_type == 'rapid':
+            config = RAPID_CONFIG if 'config' in _MODULE_STATUS else L3Config()
+        else:
+            config = DEFAULT_CONFIG if 'config' in _MODULE_STATUS else L3Config()
+    
+    # データ準備
+    if isinstance(data, (list, np.ndarray)):
+        if not isinstance(data, np.ndarray):
+            data = np.array(data)
         data_dict = {'Series': data}
     elif isinstance(data, dict):
         data_dict = data
     else:
-        try:
-            data_dict = {'Series': np.asarray(data)}
-        except Exception as e:
-            raise ValueError(f"Cannot convert data to suitable format: {e}")
+        raise ValueError(f"Unsupported data type: {type(data)}")
     
-    # 分析タイプ別実行
+    # 分析実行
     if analysis_type == 'structural':
-        # 構造テンソル特徴量抽出のみ
-        results = {}
-        for name, series_data in data_dict.items():
-            features = extract_lambda3_features(series_data, series_name=name, config=config)
-            results[name] = features
-        return results
-        
+        return _analyze_structural(data_dict, config, **kwargs)
     elif analysis_type == 'hierarchical':
-        # 階層分析
-        if not _MODULE_STATUS.get('hierarchical_analysis', False):
-            raise ImportError("Hierarchical analysis module not available")
-        
-        results = {}
-        for name, series_data in data_dict.items():
-            features = extract_lambda3_features(series_data, series_name=name, 
-                                              feature_level='comprehensive', config=config)
-            analyzer = HierarchicalAnalyzer(config=config)
-            hierarchy_result = analyzer.analyze_hierarchical_separation(features)
-            results[name] = hierarchy_result
-        return results
-        
+        return _analyze_hierarchical(data_dict, config, **kwargs)
     elif analysis_type == 'pairwise':
-        # ペアワイズ分析
-        if not _MODULE_STATUS.get('pairwise_analysis', False):
-            raise ImportError("Pairwise analysis module not available")
-        
-        if len(data_dict) < 2:
-            raise ValueError("Pairwise analysis requires at least 2 series")
-        
-        series_names = list(data_dict.keys())
-        features_dict = {}
-        
-        # 特徴量抽出
-        for name, series_data in data_dict.items():
-            features_dict[name] = extract_lambda3_features(series_data, series_name=name, config=config)
-        
-        # ペアワイズ分析実行
-        analyzer = PairwiseAnalyzer(config=config)
-        result = analyzer.analyze_asymmetric_interaction(
-            features_dict[series_names[0]], 
-            features_dict[series_names[1]]
-        )
-        return result
-        
-    elif analysis_type in ['comprehensive', 'financial']:
-        # 包括分析
-        if not _MODULE_STATUS.get('pipeline', False):
-            raise ImportError("Comprehensive pipeline not available")
-        
-        # 設定準備
-        if config is None:
-            if analysis_type == 'financial':
-                config = create_financial_config() if _MODULE_STATUS.get('config', False) else None
-            else:
-                config = create_default_config() if _MODULE_STATUS.get('config', False) else None
-        
-        # パイプライン実行
-        pipeline = Lambda3ComprehensivePipeline(config=config)
-        return pipeline.run_analysis(data_dict, **kwargs)
-    
+        return _analyze_pairwise(data_dict, config, **kwargs)
+    elif analysis_type == 'comprehensive':
+        return _analyze_comprehensive(data_dict, config, **kwargs)
+    elif analysis_type == 'financial':
+        return _analyze_financial(data_dict, config, **kwargs)
+    elif analysis_type == 'rapid':
+        return _analyze_rapid(data_dict, config, **kwargs)
     else:
         raise ValueError(f"Unknown analysis type: {analysis_type}")
 
-def extract_features(data: Union[np.ndarray, List[float]], 
-                    series_name: str = "Series",
-                    feature_level: str = 'standard',
-                    config: Optional[Any] = None,
-                    use_jit: Optional[bool] = None) -> Any:
-    """
-    構造テンソル特徴抽出の便利関数（安全版）
-    """
-    if not _MODULE_STATUS.get('structural_tensor', False):
-        raise ImportError("Structural tensor module required for feature extraction")
+def _analyze_structural(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Dict[str, Any]:
+    """構造テンソル特徴量抽出"""
+    results = {}
+    extractor = StructuralTensorExtractor(config)
     
-    return extract_lambda3_features(
-        data, 
-        config=config,
-        series_name=series_name,
-        feature_level=feature_level,
-        use_jit=use_jit
+    for name, series_data in data_dict.items():
+        features = extractor.extract_features(
+            series_data,
+            series_name=name,
+            feature_level=kwargs.get('feature_level', 'basic')
+        )
+        results[name] = features
+    
+    return results
+
+def _analyze_hierarchical(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Dict[str, Any]:
+    """階層的構造分析"""
+    if not _MODULE_STATUS.get('hierarchical_analysis', False):
+        raise ImportError("Hierarchical analysis module not available")
+    
+    return complete_hierarchical_analysis(data_dict, config)
+
+def _analyze_pairwise(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Any:
+    """ペアワイズ分析"""
+    if not _MODULE_STATUS.get('pairwise_analysis', False):
+        raise ImportError("Pairwise analysis module not available")
+    
+    if len(data_dict) < 2:
+        raise ValueError("Pairwise analysis requires at least 2 series")
+    
+    series_names = list(data_dict.keys())[:2]
+    
+    # 特徴量抽出
+    extractor = StructuralTensorExtractor(config)
+    features = {}
+    for name in series_names:
+        features[name] = extractor.extract_features(
+            data_dict[name],
+            series_name=name,
+            feature_level='basic'
+        )
+    
+    # ペアワイズ分析
+    analyzer = PairwiseAnalyzer(config)
+    return analyzer.analyze_asymmetric_interaction(
+        features[series_names[0]],
+        features[series_names[1]]
     )
 
-def create_config(config_type: str = 'default', **kwargs) -> Any:
-    """
-    設定オブジェクト作成の便利関数（安全版）
-    
-    Args:
-        config_type: 設定タイプ ('default', 'financial', 'rapid', 'research')
-        **kwargs: 追加設定パラメータ
-        
-    Returns:
-        設定オブジェクト
-    """
-    if not _MODULE_STATUS.get('config', False):
-        raise ImportError("Configuration system not available")
-    
-    config_factories = {
-        'default': create_default_config,
-        'financial': create_financial_config,
-        'rapid': create_rapid_config,
-        'research': create_research_config
+def _analyze_comprehensive(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Dict[str, Any]:
+    """包括的分析"""
+    results = {
+        'structural': _analyze_structural(data_dict, config, feature_level='comprehensive')
     }
     
-    if config_type not in config_factories:
-        raise ValueError(f"Unknown config type: {config_type}")
+    if _MODULE_STATUS.get('hierarchical_analysis', False):
+        results['hierarchical'] = _analyze_hierarchical(data_dict, config)
     
-    config = config_factories[config_type]()
+    if _MODULE_STATUS.get('pairwise_analysis', False) and len(data_dict) >= 2:
+        results['pairwise'] = _analyze_pairwise(data_dict, config)
     
-    # 追加パラメータの適用
-    for key, value in kwargs.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
-        elif hasattr(config, 'base') and hasattr(config.base, key):
-            setattr(config.base, key, value)
-    
-    return config
+    return results
 
-def apply_style(style_name: str = 'lambda3_default'):
-    """
-    Lambda³可視化スタイル適用（安全版）
-    """
-    if _MODULE_STATUS.get('visualization', False):
-        apply_lambda3_style(style_name)
-    else:
-        warnings.warn("Visualization modules not available")
+def _analyze_financial(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Any:
+    """金融市場分析"""
+    if not _MODULE_STATUS.get('financial', False):
+        # フォールバック: 包括的分析
+        return _analyze_comprehensive(data_dict, config, **kwargs)
+    
+    return analyze_financial_markets(data_dict, config=config, **kwargs)
 
-def create_sample_data(n_series: int = 3, 
-                      n_points: int = 200,
-                      series_names: Optional[List[str]] = None,
-                      random_seed: int = 42) -> Dict[str, np.ndarray]:
-    """
-    サンプルデータ生成の便利関数
-    
-    Args:
-        n_series: 系列数
-        n_points: データポイント数
-        series_names: 系列名リスト（省略時は自動生成）
-        random_seed: 乱数シード
-        
-    Returns:
-        Dict[str, np.ndarray]: サンプルデータ辞書
-    """
-    np.random.seed(random_seed)
-    
-    if series_names is None:
-        series_names = [f"Series_{i+1}" for i in range(n_series)]
-    elif len(series_names) != n_series:
-        raise ValueError(f"series_names length ({len(series_names)}) != n_series ({n_series})")
-    
-    data_dict = {}
-    
-    for i, name in enumerate(series_names):
-        # 基本トレンド
-        trend = np.cumsum(np.random.randn(n_points) * 0.02)
-        
-        # 構造変化ジャンプ
-        n_jumps = max(1, n_points // 30)
-        jump_positions = np.random.choice(n_points, size=n_jumps, replace=False)
-        jumps = np.zeros(n_points)
-        jumps[jump_positions] = np.random.normal(0, 0.5, n_jumps)
-        
-        # 張力変動
-        tension_base = 0.3 + 0.2 * np.sin(2 * np.pi * np.arange(n_points) / 50)
-        tension_noise = np.random.normal(0, 0.1, n_points)
-        
-        # 最終データ
-        data = 100 + trend + np.cumsum(jumps) + tension_base + tension_noise
-        data_dict[name] = data.astype(np.float64)
-    
-    return data_dict
+def _analyze_rapid(data_dict: Dict[str, np.ndarray], config: L3Config, **kwargs) -> Dict[str, Any]:
+    """高速分析（基本特徴量のみ）"""
+    return _analyze_structural(data_dict, config, feature_level='basic')
 
 # ==========================================================
-# パッケージ情報とステータス
+# Utility Functions
 # ==========================================================
 
-def get_package_info() -> Dict[str, Any]:
-    """パッケージ情報取得（修正版）"""
-    return {
-        'name': 'lambda3',
-        'version': __version__,
-        'author': __author__,
-        'license': __license__,
-        'description': __description__,
-        'module_status': _MODULE_STATUS.copy(),
-        'import_errors': _IMPORT_ERRORS.copy(),
-        'jit_available': _MODULE_STATUS.get('jit_functions', False),
-        'bayesian_available': False,  # 後で実装確認
-        'visualization_available': _MODULE_STATUS.get('visualization', False),
-        'total_modules': len(_MODULE_STATUS),
-        'available_modules': sum(_MODULE_STATUS.values()),
-        'availability_ratio': sum(_MODULE_STATUS.values()) / len(_MODULE_STATUS) if _MODULE_STATUS else 0.0
-    }
+def get_module_status() -> Dict[str, bool]:
+    """モジュール状態を取得"""
+    return _MODULE_STATUS.copy()
 
-def print_system_status():
-    """システム状態表示"""
-    info = get_package_info()
-    
-    print(f"\n🔍 Lambda³ System Status")
-    print("=" * 40)
-    print(f"Version: {info['version']}")
-    print(f"Author: {info['author']}")
-    print(f"Available modules: {info['available_modules']}/{info['total_modules']} ({info['availability_ratio']:.1%})")
-    
-    print(f"\n📊 Module Status:")
-    for module, status in info['module_status'].items():
-        status_icon = "✅" if status else "❌"
-        print(f"  {status_icon} {module}")
-    
-    if info['import_errors']:
-        print(f"\n⚠️  Import Errors:")
-        for error in info['import_errors']:
-            print(f"  • {error}")
-    
-    print(f"\n🚀 Core Features:")
-    print(f"  • JIT Optimization: {'✅' if info['jit_available'] else '❌'}")
-    print(f"  • Visualization: {'✅' if info['visualization_available'] else '❌'}")
-    print(f"  • Bayesian Analysis: {'✅' if info['bayesian_available'] else '❌'}")
+def get_import_errors() -> List[str]:
+    """インポートエラーを取得"""
+    return _IMPORT_ERRORS.copy()
 
-def validate_installation() -> bool:
-    """インストール検証（修正版）"""
-    info = get_package_info()
+def create_sample_data(n_series: int = 2, n_points: int = 100, seed: int = 42) -> Dict[str, np.ndarray]:
+    """サンプルデータ生成"""
+    np.random.seed(seed)
+    data = {}
     
-    print("🔍 Lambda³ Installation Validation")
-    print("=" * 40)
+    for i in range(n_series):
+        series_name = f"Series_{chr(65 + i)}"  # A, B, C, ...
+        data[series_name] = create_sample_structural_tensor(n_points, seed + i)
     
-    # 必須モジュールの確認
-    required_modules = ['types', 'structural_tensor']
-    required_available = all(info['module_status'].get(mod, False) for mod in required_modules)
-    
-    if not required_available:
-        print("❌ Critical modules missing - installation incomplete")
-        missing = [mod for mod in required_modules if not info['module_status'].get(mod, False)]
-        print(f"   Missing: {', '.join(missing)}")
-        return False
-    
-    # 可用性評価
-    if info['availability_ratio'] >= 0.8:
-        print("✅ Installation status: Excellent")
-        print("🚀 All major features available")
-    elif info['availability_ratio'] >= 0.6:
-        print("⚠️  Installation status: Good")
-        print("📊 Core features available")
-    elif info['availability_ratio'] >= 0.4:
-        print("⚠️  Installation status: Partial")
-        print("🔧 Some features limited")
-    else:
-        print("❌ Installation status: Poor")
-        print("🔧 Repair needed")
-        return False
-    
-    return True
-
-def print_welcome():
-    """ウェルカムメッセージ表示"""
-    print("\n" + "=" * 60)
-    print("🌟 Welcome to Lambda³ Analytics Framework! 🌟")
-    print("=" * 60)
-    print("📚 Lambda³ Theory: Structural Tensor Analytics for Time Series")
-    print(f"🔬 Version: {__version__}")
-    print(f"👨‍💻 Author: {__author__}")
-    print("📖 License: MIT")
-    
-    print(f"\n🎯 Quick Start:")
-    print("   import lambda3 as l3")
-    print("   data = l3.create_sample_data()")
-    print("   results = l3.analyze(data)")
-    
-    print(f"\n🔧 System Check:")
-    info = get_package_info()
-    print(f"   Modules: {info['available_modules']}/{info['total_modules']} available")
-    print(f"   JIT: {'✅' if info['jit_available'] else '❌'}")
-    print(f"   Status: {'✅ Ready' if info['availability_ratio'] >= 0.6 else '⚠️ Limited'}")
-    
-    if info['availability_ratio'] < 0.6:
-        print(f"\n💡 Recommendations:")
-        print("   • pip install -r requirements.txt")
-        print("   • pip install -e .")
-        if not info['jit_available']:
-            print("   • pip install numba  # for JIT optimization")
+    return data
 
 # ==========================================================
-# __all__ 定義（利用可能なもののみ）
+# Module Summary
+# ==========================================================
+
+print("\nModule Status Summary:")
+for module, status in _MODULE_STATUS.items():
+    status_symbol = "✅" if status else "❌"
+    print(f"   {status_symbol} {module}")
+
+if _IMPORT_ERRORS:
+    print("\n⚠️  Some modules failed to load. Run with verbose=True for details.")
+
+print(f"\nLambda³ Finance Analyzer initialized successfully!")
+print(f"JIT optimization: {'Enabled' if JIT_FUNCTIONS_AVAILABLE else 'Disabled'}")
+
+# ==========================================================
+# Module Exports
 # ==========================================================
 
 __all__ = [
-    # バージョン情報
-    '__version__', '__author__', '__license__', '__description__',
+    # Version info
+    '__version__',
+    '__author__',
+    '__license__',
     
-    # 便利関数（常に利用可能）
-    'analyze', 'extract_features', 'create_config', 'apply_style', 'create_sample_data',
-    'get_package_info', 'print_system_status', 'validate_installation', 'print_welcome'
+    # Main API
+    'analyze',
+    
+    # Configuration
+    'L3Config',
+    'L3FinancialConfig',
+    'L3ResearchConfig',
+    'L3RapidConfig',
+    'create_config',
+    'DEFAULT_CONFIG',
+    'FINANCIAL_CONFIG',
+    
+    # Core classes
+    'StructuralTensorFeatures',
+    'StructuralTensorExtractor',
+    'HierarchicalAnalyzer',
+    'PairwiseAnalyzer',
+    
+    # Results classes
+    'HierarchicalSeparationResults',
+    'PairwiseInteractionResults',
+    
+    # Analysis functions
+    'extract_lambda3_features',
+    'analyze_hierarchical_structure',
+    'analyze_pairwise_interaction',
+    'complete_hierarchical_analysis',
+    
+    # JIT functions
+    'test_jit_functions',
+    'run_jit_benchmark',
+    
+    # Utilities
+    'get_module_status',
+    'get_import_errors',
+    'create_sample_data',
+    'create_sample_structural_tensor',
+    
+    # Constants
+    'JIT_FUNCTIONS_AVAILABLE'
 ]
-
-# 条件付きで追加
-if _MODULE_STATUS.get('types', False):
-    __all__.extend([
-        'StructuralTensorProtocol', 'HierarchicalResultProtocol', 'PairwiseResultProtocol',
-        'AnalysisMode', 'FeatureLevel', 'QualityLevel',
-        'Lambda3Error', 'StructuralTensorError'
-    ])
-
-if _MODULE_STATUS.get('config', False):
-    __all__.extend([
-        'L3BaseConfig', 'L3ComprehensiveConfig',
-        'create_default_config', 'create_financial_config', 
-        'create_rapid_config', 'create_research_config'
-    ])
-
-if _MODULE_STATUS.get('jit_functions', False):
-    __all__.extend([
-        'test_jit_functions', 'run_jit_benchmark'
-    ])
-
-if _MODULE_STATUS.get('structural_tensor', False):
-    __all__.extend([
-        'StructuralTensorFeatures', 'StructuralTensorExtractor',
-        'create_sample_structural_tensor'
-    ])
-
-if _MODULE_STATUS.get('hierarchical_analysis', False):
-    __all__.extend([
-        'HierarchicalAnalyzer', 'HierarchicalSeparationResults'
-    ])
-
-if _MODULE_STATUS.get('pairwise_analysis', False):
-    __all__.extend([
-        'PairwiseAnalyzer', 'PairwiseInteractionResults'
-    ])
-
-if _MODULE_STATUS.get('visualization', False):
-    __all__.extend([
-        'Lambda3BaseVisualizer', 'TimeSeriesVisualizer', 
-        'InteractionVisualizer', 'HierarchicalVisualizer'
-    ])
-
-if _MODULE_STATUS.get('pipeline', False):
-    __all__.extend([
-        'Lambda3ComprehensivePipeline', 'Lambda3ComprehensiveResults',
-        'run_lambda3_analysis', 'create_analysis_report'
-    ])
-
-# ==========================================================
-# 初期化完了メッセージ
-# ==========================================================
-
-def _finalize_initialization():
-    """初期化完了処理"""
-    info = get_package_info()
-    
-    if info['availability_ratio'] >= 0.6:
-        status_emoji = "✅"
-        status_text = "Ready"
-    elif info['availability_ratio'] >= 0.4:
-        status_emoji = "⚠️"
-        status_text = "Partial"
-    else:
-        status_emoji = "❌"
-        status_text = "Limited"
-    
-    print(f"   {status_emoji} Lambda³ initialized: {status_text} ({info['available_modules']}/{info['total_modules']} modules)")
-    
-    if info['jit_available']:
-        print("   ⚡ JIT optimization enabled")
-    
-    if info['import_errors'] and len(info['import_errors']) <= 3:
-        print(f"   ⚠️  {len(info['import_errors'])} minor issues detected")
-
-# 初期化完了
-_finalize_initialization()
-
-# ==========================================================
-# 最小限の機能確認
-# ==========================================================
-
-if not _MODULE_STATUS.get('types', False) and not _MODULE_STATUS.get('structural_tensor', False):
-    warnings.warn(
-        "Lambda³ critical modules unavailable. "
-        "Please check installation: pip install -e ."
-    )
-
-# ==========================================================
-# デバッグ用ヘルパー
-# ==========================================================
-
-def debug_import_issues():
-    """インポート問題のデバッグ情報表示"""
-    print("🐛 Lambda³ Import Debug Information")
-    print("=" * 50)
-    
-    print("Python Version:", sys.version)
-    print("Lambda³ Version:", __version__)
-    
-    print(f"\nModule Status:")
-    for module, status in _MODULE_STATUS.items():
-        print(f"  {module}: {'✅' if status else '❌'}")
-    
-    if _IMPORT_ERRORS:
-        print(f"\nImport Errors:")
-        for i, error in enumerate(_IMPORT_ERRORS, 1):
-            print(f"  {i}. {error}")
-    
-    print(f"\nSystem Path:")
-    for i, path in enumerate(sys.path[:5], 1):
-        print(f"  {i}. {path}")
-    
-    print(f"\nRecommended Actions:")
-    if not _MODULE_STATUS.get('jit_functions', False):
-        print("  • Install JIT: pip install numba")
-    if _MODULE_STATUS.get('config', False) and not _MODULE_STATUS.get('structural_tensor', False):
-        print("  • Check core modules: pip install -e . --force-reinstall")
-    if len(_IMPORT_ERRORS) > 5:
-        print("  • Clean install: pip uninstall lambda3 && pip install -e .")
-
-# 条件付きでデバッグ関数をエクスポート
-if len(_IMPORT_ERRORS) > 0:
-    __all__.append('debug_import_issues')
