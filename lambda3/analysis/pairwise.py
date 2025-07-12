@@ -10,7 +10,7 @@ Lambda³理論ペアワイズ相互作用解析モジュール（完全準拠版
 ∆ΛC pulsationsの相互響応パターンを解析。
 
 重要: 全ての相関・同期計算は∆ΛC（構造変化）とρT（張力スカラー）
-のみで実行。元データの直接使用は厳禁。
+の変化率のみで実行。元データの直接使用は厳禁。
 
 核心概念:
 - 非対称相互作用: A→B と B→A の方向別影響度
@@ -18,7 +18,7 @@ Lambda³理論ペアワイズ相互作用解析モジュール（完全準拠版
 - 因果構造: 時間非依存の構造空間因果関係
 - 張力伝播: ρT張力スカラーの系列間伝播
 
-Author: Mamichi Iizumi (Miosync, Inc.)
+Author: Masamichi Iizumi (Miosync, Inc.)
 License: MIT
 """
 
@@ -69,6 +69,8 @@ except ImportError:
         def __init__(self):
             self.window = 10
             self.threshold_percentile = 95.0
+            self.lag_window = 10
+            self.sync_threshold = 0.3
 
 # 構造テンソル（条件付きインポート）
 if TYPE_CHECKING:
@@ -105,9 +107,9 @@ except ImportError:
 @dataclass
 class PairwiseInteractionResults:
     """
-    ペアワイズ相互作用分析結果（Lambda³理論準拠版）
+    ペアワイズ相互作用分析結果（Lambda³理論完全準拠版）
     
-    全ての指標は構造テンソル成分（∆ΛC, ρT）から算出。
+    全ての指標は構造テンソル成分の変化（∆ΛC, ∆ρT）から算出。
     元データの直接相関は含まない。
     """
     
@@ -118,15 +120,15 @@ class PairwiseInteractionResults:
     
     # 構造同期指標（∆ΛCベース）
     structure_synchronization: float = 0.0     # ∆ΛC同期強度
-    tension_synchronization: float = 0.0       # ρT同期強度
+    tension_synchronization: float = 0.0       # ∆ρT同期強度
     
     # 構造因果性指標（∆ΛCベース）
     structure_causality_a_to_b: float = 0.0    # ∆ΛC: A→B因果
     structure_causality_b_to_a: float = 0.0    # ∆ΛC: B→A因果
     
-    # 張力因果性指標（ρTベース）
-    tension_causality_a_to_b: float = 0.0      # ρT: A→B因果
-    tension_causality_b_to_a: float = 0.0      # ρT: B→A因果
+    # 張力因果性指標（∆ρTベース）
+    tension_causality_a_to_b: float = 0.0      # ∆ρT: A→B因果
+    tension_causality_b_to_a: float = 0.0      # ∆ρT: B→A因果
     
     # 統合指標
     asymmetry_index: float = 0.0              # 非対称性指標
@@ -201,14 +203,14 @@ class PairwiseInteractionResults:
         return (self.causality_a_to_b + self.causality_b_to_a) / 2
 
 # ==========================================================
-# ペアワイズ分析器クラス（Lambda³理論準拠版）
+# ペアワイズ分析器クラス（Lambda³理論完全準拠版）
 # ==========================================================
 
 class PairwiseAnalyzer:
     """
     Lambda³ペアワイズ相互作用分析器（完全準拠版）
     
-    全ての分析は構造テンソル成分（∆ΛC, ρT）のみで実行。
+    全ての分析は構造テンソル成分の変化（∆ΛC, ∆ρT）のみで実行。
     元データの直接使用は行わない。
     """
     
@@ -248,7 +250,7 @@ class PairwiseAnalyzer:
         use_bayesian: bool = False
     ) -> PairwiseInteractionResults:
         """
-        非対称相互作用分析実行（Lambda³理論準拠）
+        非対称相互作用分析実行（Lambda³理論完全準拠）
         
         Args:
             features_a: 系列Aの構造テンソル特徴量
@@ -370,7 +372,7 @@ class PairwiseAnalyzer:
         components_a: Dict[str, Any],
         components_b: Dict[str, Any]
     ) -> PairwiseInteractionResults:
-        """標準ペアワイズ分析（Lambda³理論準拠）"""
+        """標準ペアワイズ分析（Lambda³理論完全準拠）"""
         
         name_a = components_a['name']
         name_b = components_b['name']
@@ -388,7 +390,7 @@ class PairwiseAnalyzer:
             components_a, components_b, min_length
         )
         
-        # 張力同期分析（ρTベース）
+        # 張力同期分析（∆ρTベース）
         tension_sync_results = self._calculate_tension_synchronization(
             components_a, components_b, min_length
         )
@@ -398,7 +400,7 @@ class PairwiseAnalyzer:
             components_a, components_b, min_length
         )
         
-        # 張力因果性分析（ρTベース）
+        # 張力因果性分析（∆ρTベース）
         tension_causality = self._calculate_tension_causality(
             components_a, components_b, min_length
         )
@@ -408,7 +410,7 @@ class PairwiseAnalyzer:
             components_a, components_b, min_length
         )
         
-        # 位相結合分析（構造テンソルベース）
+        # 位相結合分析（構造テンソル変化ベース）
         phase_coupling = self._calculate_phase_coupling(
             components_a, components_b, min_length
         )
@@ -480,27 +482,28 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, Any]:
-        """構造同期計算（∆ΛCベース）"""
+        """構造同期計算（∆ΛCベース - Lambda³理論準拠）"""
         
         # 構造変化イベントの統合
         events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
         events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
         
-        # 基本同期強度
+        # 基本同期強度（構造変化の同時発生のみを評価）
         if np.sum(events_a) > 0 and np.sum(events_b) > 0:
             # 構造変化の同時発生率
-            sync_strength = np.mean(events_a * events_b)
+            simultaneous_changes = (events_a > 0) & (events_b > 0)
+            sync_strength = np.sum(simultaneous_changes) / np.sqrt(np.sum(events_a > 0) * np.sum(events_b > 0))
             
             # 条件付き同期率
-            conditional_sync_ab = np.sum(events_a * events_b) / (np.sum(events_a) + 1e-8)
-            conditional_sync_ba = np.sum(events_a * events_b) / (np.sum(events_b) + 1e-8)
+            conditional_sync_ab = np.sum(simultaneous_changes) / (np.sum(events_a > 0) + 1e-8)
+            conditional_sync_ba = np.sum(simultaneous_changes) / (np.sum(events_b > 0) + 1e-8)
         else:
             sync_strength = 0.0
             conditional_sync_ab = 0.0
             conditional_sync_ba = 0.0
         
-        # 同期プロファイル計算
-        sync_profile = self._calculate_sync_profile(events_a, events_b)
+        # 同期プロファイル計算（構造変化イベントベース）
+        sync_profile = self._calculate_sync_profile_structural(events_a > 0, events_b > 0)
         
         return {
             'sync_strength': sync_strength,
@@ -515,26 +518,31 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, Any]:
-        """張力同期計算（ρTベース）"""
+        """張力同期計算（∆ρTベース - Lambda³理論準拠）"""
         
         rho_a = components_a['rho_T'][:min_length]
         rho_b = components_b['rho_T'][:min_length]
         
-        # 張力相関（正規化後）
-        if len(rho_a) > 1 and len(rho_b) > 1:
-            # 正規化
-            rho_a_norm = (rho_a - np.mean(rho_a)) / (np.std(rho_a) + 1e-8)
-            rho_b_norm = (rho_b - np.mean(rho_b)) / (np.std(rho_b) + 1e-8)
-            
-            # 相関計算
-            sync_strength = abs(np.corrcoef(rho_a_norm, rho_b_norm)[0, 1])
-            if np.isnan(sync_strength):
-                sync_strength = 0.0
+        # 張力変化率の計算（元データの相関ではない）
+        delta_rho_a = np.diff(rho_a, prepend=rho_a[0])
+        delta_rho_b = np.diff(rho_b, prepend=rho_b[0])
+        
+        # 張力変化イベントの検出
+        threshold_a = np.std(delta_rho_a) * 1.5
+        threshold_b = np.std(delta_rho_b) * 1.5
+        
+        tension_events_a = np.abs(delta_rho_a) > threshold_a
+        tension_events_b = np.abs(delta_rho_b) > threshold_b
+        
+        # 張力変化の同期強度
+        if np.sum(tension_events_a) > 0 and np.sum(tension_events_b) > 0:
+            simultaneous_tension = tension_events_a & tension_events_b
+            sync_strength = np.sum(simultaneous_tension) / np.sqrt(np.sum(tension_events_a) * np.sum(tension_events_b))
         else:
             sync_strength = 0.0
         
-        # 同期プロファイル計算
-        sync_profile = self._calculate_sync_profile(rho_a, rho_b)
+        # 同期プロファイル計算（張力変化イベントベース）
+        sync_profile = self._calculate_sync_profile_structural(tension_events_a, tension_events_b)
         
         return {
             'sync_strength': sync_strength,
@@ -547,7 +555,7 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """構造因果性計算（∆ΛCベース）"""
+        """構造因果性計算（∆ΛCベース - Lambda³理論準拠）"""
         
         events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
         events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
@@ -555,19 +563,19 @@ class PairwiseAnalyzer:
         causality_a_to_b = 0.0
         causality_b_to_a = 0.0
         
-        # 遅延因果性の計算
+        # 遅延因果性の計算（構造変化イベントの遅延パターン）
         for lag in range(1, min(10, min_length // 5)):
             if lag < min_length:
                 # A(t-lag) → B(t)
-                if np.sum(events_a[:-lag]) > 0:
-                    joint_ab = np.sum(events_a[:-lag] * events_b[lag:])
-                    marginal_a = np.sum(events_a[:-lag])
+                if np.sum(events_a[:-lag] > 0) > 0:
+                    joint_ab = np.sum((events_a[:-lag] > 0) & (events_b[lag:] > 0))
+                    marginal_a = np.sum(events_a[:-lag] > 0)
                     causality_a_to_b = max(causality_a_to_b, joint_ab / marginal_a)
                 
                 # B(t-lag) → A(t)
-                if np.sum(events_b[:-lag]) > 0:
-                    joint_ba = np.sum(events_b[:-lag] * events_a[lag:])
-                    marginal_b = np.sum(events_b[:-lag])
+                if np.sum(events_b[:-lag] > 0) > 0:
+                    joint_ba = np.sum((events_b[:-lag] > 0) & (events_a[lag:] > 0))
+                    marginal_b = np.sum(events_b[:-lag] > 0)
                     causality_b_to_a = max(causality_b_to_a, joint_ba / marginal_b)
         
         return {
@@ -581,40 +589,51 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """張力因果性計算（ρTベース）"""
+        """張力因果性計算（∆ρTベース - Lambda³理論準拠）"""
         
         rho_a = components_a['rho_T'][:min_length]
         rho_b = components_b['rho_T'][:min_length]
         
+        # 張力変化率
+        delta_rho_a = np.diff(rho_a, prepend=rho_a[0])
+        delta_rho_b = np.diff(rho_b, prepend=rho_b[0])
+        
+        # 張力変化イベント
+        threshold_a = np.std(delta_rho_a) * 1.5
+        threshold_b = np.std(delta_rho_b) * 1.5
+        
+        tension_events_a = np.abs(delta_rho_a) > threshold_a
+        tension_events_b = np.abs(delta_rho_b) > threshold_b
+        
         causality_a_to_b = 0.0
         causality_b_to_a = 0.0
         
-        # 遅延相関による因果性
+        # 遅延因果性（張力変化イベントベース）
         for lag in range(1, min(10, min_length // 5)):
             if lag < min_length:
                 # A(t-lag) → B(t)
-                if len(rho_a[:-lag]) > 1 and len(rho_b[lag:]) > 1:
-                    corr_ab = np.corrcoef(rho_a[:-lag], rho_b[lag:])[0, 1]
-                    if not np.isnan(corr_ab):
-                        causality_a_to_b = max(causality_a_to_b, abs(corr_ab))
+                if np.sum(tension_events_a[:-lag]) > 0:
+                    joint_ab = np.sum(tension_events_a[:-lag] & tension_events_b[lag:])
+                    marginal_a = np.sum(tension_events_a[:-lag])
+                    causality_a_to_b = max(causality_a_to_b, joint_ab / marginal_a)
                 
                 # B(t-lag) → A(t)
-                if len(rho_b[:-lag]) > 1 and len(rho_a[lag:]) > 1:
-                    corr_ba = np.corrcoef(rho_b[:-lag], rho_a[lag:])[0, 1]
-                    if not np.isnan(corr_ba):
-                        causality_b_to_a = max(causality_b_to_a, abs(corr_ba))
+                if np.sum(tension_events_b[:-lag]) > 0:
+                    joint_ba = np.sum(tension_events_b[:-lag] & tension_events_a[lag:])
+                    marginal_b = np.sum(tension_events_b[:-lag])
+                    causality_b_to_a = max(causality_b_to_a, joint_ba / marginal_b)
         
         return {
             'a_to_b': causality_a_to_b,
             'b_to_a': causality_b_to_a
         }
     
-    def _calculate_sync_profile(
+    def _calculate_sync_profile_structural(
         self,
-        series_a: np.ndarray,
-        series_b: np.ndarray
+        events_a: np.ndarray,
+        events_b: np.ndarray
     ) -> Dict[str, float]:
-        """同期プロファイル計算（汎用）"""
+        """同期プロファイル計算（構造変化イベントベース）"""
         
         lag_window = getattr(self.config, 'lag_window', 10)
         sync_profile = {}
@@ -624,36 +643,30 @@ class PairwiseAnalyzer:
         for lag in range(-lag_window, lag_window + 1):
             if lag < 0:
                 # B leads A
-                if -lag < len(series_a):
-                    a_lagged = series_a[-lag:]
-                    b_current = series_b[:lag]
-                    if len(a_lagged) > 1 and len(b_current) > 1:
-                        sync = abs(np.corrcoef(a_lagged, b_current)[0, 1])
-                        if np.isnan(sync):
-                            sync = 0.0
+                if -lag < len(events_a):
+                    a_lagged = events_a[-lag:]
+                    b_current = events_b[:lag]
+                    if len(a_lagged) > 0 and len(b_current) > 0:
+                        sync = np.sum(a_lagged & b_current) / np.sqrt(np.sum(a_lagged) * np.sum(b_current) + 1e-8)
                     else:
                         sync = 0.0
                 else:
                     sync = 0.0
             elif lag > 0:
                 # A leads B
-                if lag < len(series_b):
-                    a_current = series_a[:-lag]
-                    b_lagged = series_b[lag:]
-                    if len(a_current) > 1 and len(b_lagged) > 1:
-                        sync = abs(np.corrcoef(a_current, b_lagged)[0, 1])
-                        if np.isnan(sync):
-                            sync = 0.0
+                if lag < len(events_b):
+                    a_current = events_a[:-lag]
+                    b_lagged = events_b[lag:]
+                    if len(a_current) > 0 and len(b_lagged) > 0:
+                        sync = np.sum(a_current & b_lagged) / np.sqrt(np.sum(a_current) * np.sum(b_lagged) + 1e-8)
                     else:
                         sync = 0.0
                 else:
                     sync = 0.0
             else:
                 # No lag
-                if len(series_a) > 1 and len(series_b) > 1:
-                    sync = abs(np.corrcoef(series_a, series_b)[0, 1])
-                    if np.isnan(sync):
-                        sync = 0.0
+                if len(events_a) > 0 and len(events_b) > 0:
+                    sync = np.sum(events_a & events_b) / np.sqrt(np.sum(events_a) * np.sum(events_b) + 1e-8)
                 else:
                     sync = 0.0
             
@@ -701,37 +714,37 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """構造-張力相互作用計算"""
+        """構造-張力相互作用計算（変化ベース）"""
         
-        # 構造変化→張力への影響
-        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
-        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
-        rho_a = components_a['rho_T'][:min_length]
-        rho_b = components_b['rho_T'][:min_length]
+        # 構造変化イベント
+        events_a = (components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]) > 0
+        events_b = (components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]) > 0
         
-        # 構造変化時の張力応答
+        # 張力変化
+        delta_rho_a = np.diff(components_a['rho_T'][:min_length], prepend=0)
+        delta_rho_b = np.diff(components_b['rho_T'][:min_length], prepend=0)
+        
+        # 構造変化→張力変化への影響
         structure_to_tension_a = 0.0
         structure_to_tension_b = 0.0
         
         if np.sum(events_a) > 0:
-            # A構造変化時のB張力応答
-            event_indices_a = np.where(events_a > 0)[0]
+            # A構造変化時のB張力変化
+            event_indices_a = np.where(events_a)[0]
+            tension_response = 0.0
             for idx in event_indices_a:
                 if idx + 5 < min_length:  # 5ステップ先まで見る
-                    tension_response = np.mean(rho_b[idx:idx+5])
-                    baseline = np.mean(rho_b[max(0, idx-5):idx]) if idx > 0 else np.mean(rho_b)
-                    structure_to_tension_a += abs(tension_response - baseline)
-            structure_to_tension_a /= (len(event_indices_a) + 1e-8)
+                    tension_response += np.abs(np.mean(delta_rho_b[idx:idx+5]))
+            structure_to_tension_a = tension_response / len(event_indices_a)
         
         if np.sum(events_b) > 0:
-            # B構造変化時のA張力応答
-            event_indices_b = np.where(events_b > 0)[0]
+            # B構造変化時のA張力変化
+            event_indices_b = np.where(events_b)[0]
+            tension_response = 0.0
             for idx in event_indices_b:
                 if idx + 5 < min_length:
-                    tension_response = np.mean(rho_a[idx:idx+5])
-                    baseline = np.mean(rho_a[max(0, idx-5):idx]) if idx > 0 else np.mean(rho_a)
-                    structure_to_tension_b += abs(tension_response - baseline)
-            structure_to_tension_b /= (len(event_indices_b) + 1e-8)
+                    tension_response += np.abs(np.mean(delta_rho_a[idx:idx+5]))
+            structure_to_tension_b = tension_response / len(event_indices_b)
         
         return {
             'structure_a_to_tension_b': structure_to_tension_a,
@@ -744,31 +757,37 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """階層間相互作用係数計算"""
+        """階層間相互作用係数計算（構造変化ベース）"""
+        
+        # 局所イベント
+        local_events_a = ((components_a['local_pos'][:min_length] + 
+                          components_a['local_neg'][:min_length]) > 0)
+        local_events_b = ((components_b['local_pos'][:min_length] + 
+                          components_b['local_neg'][:min_length]) > 0)
+        
+        # 大域イベント
+        global_events_a = ((components_a['global_pos'][:min_length] + 
+                           components_a['global_neg'][:min_length]) > 0)
+        global_events_b = ((components_b['global_pos'][:min_length] + 
+                           components_b['global_neg'][:min_length]) > 0)
         
         # 局所→大域相互作用
         local_to_global_a = 0.0
         local_to_global_b = 0.0
         
-        # 局所イベント
-        local_events_a = (components_a['local_pos'][:min_length] + 
-                         components_a['local_neg'][:min_length])
-        local_events_b = (components_b['local_pos'][:min_length] + 
-                         components_b['local_neg'][:min_length])
+        # 局所Aが大域Bに与える影響（遅延効果）
+        for lag in range(1, 6):
+            if lag < min_length and np.sum(local_events_a[:-lag]) > 0:
+                joint = np.sum(local_events_a[:-lag] & global_events_b[lag:])
+                marginal = np.sum(local_events_a[:-lag])
+                local_to_global_a = max(local_to_global_a, joint / marginal)
         
-        # 大域イベント
-        global_events_a = (components_a['global_pos'][:min_length] + 
-                          components_a['global_neg'][:min_length])
-        global_events_b = (components_b['global_pos'][:min_length] + 
-                          components_b['global_neg'][:min_length])
-        
-        # 局所Aが大域Bに与える影響
-        if np.sum(local_events_a) > 0 and np.sum(global_events_b) > 0:
-            local_to_global_a = np.sum(local_events_a * global_events_b) / np.sum(local_events_a)
-        
-        # 局所Bが大域Aに与える影響
-        if np.sum(local_events_b) > 0 and np.sum(global_events_a) > 0:
-            local_to_global_b = np.sum(local_events_b * global_events_a) / np.sum(local_events_b)
+        # 局所Bが大域Aに与える影響（遅延効果）
+        for lag in range(1, 6):
+            if lag < min_length and np.sum(local_events_b[:-lag]) > 0:
+                joint = np.sum(local_events_b[:-lag] & global_events_a[lag:])
+                marginal = np.sum(local_events_b[:-lag])
+                local_to_global_b = max(local_to_global_b, joint / marginal)
         
         return {
             'local_a_to_global_b': local_to_global_a,
@@ -781,35 +800,48 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """位相結合計算（構造テンソルベース）"""
+        """位相結合計算（構造テンソル変化ベース）"""
         
-        rho_a = components_a['rho_T'][:min_length]
-        rho_b = components_b['rho_T'][:min_length]
+        # 構造変化の位相情報（変化の方向）
+        delta_a = components_a['delta_pos'][:min_length] - components_a['delta_neg'][:min_length]
+        delta_b = components_b['delta_pos'][:min_length] - components_b['delta_neg'][:min_length]
         
-        if len(rho_a) > 10 and len(rho_b) > 10:
-            # 張力変化率（位相情報）
-            phase_a = np.diff(rho_a)
-            phase_b = np.diff(rho_b)
-            
-            # 位相同期
-            if len(phase_a) > 1 and len(phase_b) > 1:
-                coupling_strength = abs(np.corrcoef(phase_a, phase_b)[0, 1])
-                if np.isnan(coupling_strength):
-                    coupling_strength = 0.0
-                
-                # 位相遅延
-                cross_corr = np.correlate(phase_a, phase_b, mode='full')
-                phase_lag = np.argmax(cross_corr) - len(phase_a) + 1
-            else:
-                coupling_strength = 0.0
-                phase_lag = 0
+        # 位相変化（符号変化）
+        phase_a = np.sign(delta_a)
+        phase_b = np.sign(delta_b)
+        
+        # 位相同期（同じ方向への変化）
+        phase_sync = np.sum((phase_a != 0) & (phase_b != 0) & (phase_a == phase_b))
+        total_phase_events = np.sum((phase_a != 0) | (phase_b != 0))
+        
+        if total_phase_events > 0:
+            coupling_strength = phase_sync / total_phase_events
         else:
             coupling_strength = 0.0
-            phase_lag = 0
+        
+        # 位相遅延（最大同期を示す遅延）
+        max_sync = 0.0
+        best_lag = 0
+        
+        for lag in range(-10, 11):
+            if 0 <= lag < min_length:
+                sync = np.sum((phase_a[:-lag] != 0) & (phase_b[lag:] != 0) & 
+                             (phase_a[:-lag] == phase_b[lag:]))
+                total = np.sum((phase_a[:-lag] != 0) | (phase_b[lag:] != 0))
+            elif -min_length < lag < 0:
+                sync = np.sum((phase_a[-lag:] != 0) & (phase_b[:lag] != 0) & 
+                             (phase_a[-lag:] == phase_b[:lag]))
+                total = np.sum((phase_a[-lag:] != 0) | (phase_b[:lag] != 0))
+            else:
+                continue
+            
+            if total > 0 and sync / total > max_sync:
+                max_sync = sync / total
+                best_lag = lag
         
         return {
             'coupling_strength': coupling_strength,
-            'phase_lag': float(phase_lag)
+            'phase_lag': float(best_lag)
         }
     
     def _assess_structure_quality(
@@ -818,14 +850,14 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> float:
-        """構造品質評価"""
+        """構造品質評価（構造変化の豊富さ）"""
         
         # データ長品質
         length_quality = min(1.0, min_length / 50)
         
-        # 構造変化の豊富さ
-        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
-        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
+        # 構造変化イベント
+        events_a = (components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]) > 0
+        events_b = (components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]) > 0
         
         event_density_a = np.sum(events_a) / min_length
         event_density_b = np.sum(events_b) / min_length
@@ -835,10 +867,11 @@ class PairwiseAnalyzer:
         density_quality_b = min(1.0, event_density_b / 0.1) if event_density_b < 0.2 else 0.5
         density_quality = (density_quality_a + density_quality_b) / 2
         
-        # 張力の変動性
-        rho_std_a = np.std(components_a['rho_T'][:min_length])
-        rho_std_b = np.std(components_b['rho_T'][:min_length])
-        variability_quality = 1.0 if rho_std_a > 1e-3 and rho_std_b > 1e-3 else 0.5
+        # 張力変動性（変化率ベース）
+        delta_rho_a = np.diff(components_a['rho_T'][:min_length], prepend=0)
+        delta_rho_b = np.diff(components_b['rho_T'][:min_length], prepend=0)
+        
+        variability_quality = 1.0 if np.std(delta_rho_a) > 1e-3 and np.std(delta_rho_b) > 1e-3 else 0.5
         
         # 統合品質
         overall_quality = (
@@ -891,7 +924,7 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, Dict[int, float]]:
-        """因果性パターン計算（構造テンソルベース）"""
+        """因果性パターン計算（構造変化イベントベース）"""
         
         patterns = {
             'structure_a_to_b': {},
@@ -901,34 +934,41 @@ class PairwiseAnalyzer:
         }
         
         # 構造変化イベント
-        events_a = components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]
-        events_b = components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]
+        events_a = (components_a['delta_pos'][:min_length] + components_a['delta_neg'][:min_length]) > 0
+        events_b = (components_b['delta_pos'][:min_length] + components_b['delta_neg'][:min_length]) > 0
         
-        # 張力
-        rho_a = components_a['rho_T'][:min_length]
-        rho_b = components_b['rho_T'][:min_length]
+        # 張力変化イベント
+        delta_rho_a = np.diff(components_a['rho_T'][:min_length], prepend=0)
+        delta_rho_b = np.diff(components_b['rho_T'][:min_length], prepend=0)
+        
+        tension_events_a = np.abs(delta_rho_a) > np.std(delta_rho_a) * 1.5
+        tension_events_b = np.abs(delta_rho_b) > np.std(delta_rho_b) * 1.5
         
         # 各遅延での因果性
         for lag in range(1, min(20, min_length // 10)):
             # 構造因果性
             if lag < min_length and np.sum(events_a[:-lag]) > 0:
                 patterns['structure_a_to_b'][lag] = (
-                    np.sum(events_a[:-lag] * events_b[lag:]) / np.sum(events_a[:-lag])
+                    np.sum(events_a[:-lag] & events_b[lag:]) / np.sum(events_a[:-lag])
                 )
             
             if lag < min_length and np.sum(events_b[:-lag]) > 0:
                 patterns['structure_b_to_a'][lag] = (
-                    np.sum(events_b[:-lag] * events_a[lag:]) / np.sum(events_b[:-lag])
+                    np.sum(events_b[:-lag] & events_a[lag:]) / np.sum(events_b[:-lag])
                 )
             
             # 張力因果性
-            if lag < min_length and len(rho_a[:-lag]) > 1:
-                corr_ab = np.corrcoef(rho_a[:-lag], rho_b[lag:])[0, 1]
-                patterns['tension_a_to_b'][lag] = abs(corr_ab) if not np.isnan(corr_ab) else 0.0
+            if lag < min_length and np.sum(tension_events_a[:-lag]) > 0:
+                patterns['tension_a_to_b'][lag] = (
+                    np.sum(tension_events_a[:-lag] & tension_events_b[lag:]) / 
+                    np.sum(tension_events_a[:-lag])
+                )
             
-            if lag < min_length and len(rho_b[:-lag]) > 1:
-                corr_ba = np.corrcoef(rho_b[:-lag], rho_a[lag:])[0, 1]
-                patterns['tension_b_to_a'][lag] = abs(corr_ba) if not np.isnan(corr_ba) else 0.0
+            if lag < min_length and np.sum(tension_events_b[:-lag]) > 0:
+                patterns['tension_b_to_a'][lag] = (
+                    np.sum(tension_events_b[:-lag] & tension_events_a[lag:]) / 
+                    np.sum(tension_events_b[:-lag])
+                )
         
         return patterns
     
@@ -938,31 +978,32 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Dict[str, float]:
-        """階層的相互作用計算"""
+        """階層的相互作用計算（構造変化ベース）"""
         
         if components_a.get('local_pos') is None or components_b.get('local_pos') is None:
             return {}
         
-        # 各階層での同期強度
-        local_sync = self._calculate_hierarchical_sync(
-            components_a['local_pos'][:min_length] + components_a['local_neg'][:min_length],
-            components_b['local_pos'][:min_length] + components_b['local_neg'][:min_length]
-        )
+        # 各階層での同期強度（構造変化イベントベース）
+        local_events_a = ((components_a['local_pos'][:min_length] + 
+                          components_a['local_neg'][:min_length]) > 0)
+        local_events_b = ((components_b['local_pos'][:min_length] + 
+                          components_b['local_neg'][:min_length]) > 0)
         
-        global_sync = self._calculate_hierarchical_sync(
-            components_a['global_pos'][:min_length] + components_a['global_neg'][:min_length],
-            components_b['global_pos'][:min_length] + components_b['global_neg'][:min_length]
-        )
+        global_events_a = ((components_a['global_pos'][:min_length] + 
+                           components_a['global_neg'][:min_length]) > 0)
+        global_events_b = ((components_b['global_pos'][:min_length] + 
+                           components_b['global_neg'][:min_length]) > 0)
+        
+        local_sync = self._calculate_hierarchical_sync(local_events_a, local_events_b)
+        global_sync = self._calculate_hierarchical_sync(global_events_a, global_events_b)
         
         # クロススケール相互作用
         cross_scale_a_to_b = self._calculate_cross_scale_interaction(
-            components_a['local_pos'][:min_length] + components_a['local_neg'][:min_length],
-            components_b['global_pos'][:min_length] + components_b['global_neg'][:min_length]
+            local_events_a, global_events_b
         )
         
         cross_scale_b_to_a = self._calculate_cross_scale_interaction(
-            components_b['local_pos'][:min_length] + components_b['local_neg'][:min_length],
-            components_a['global_pos'][:min_length] + components_a['global_neg'][:min_length]
+            local_events_b, global_events_a
         )
         
         return {
@@ -973,20 +1014,22 @@ class PairwiseAnalyzer:
         }
     
     def _calculate_hierarchical_sync(self, events_a: np.ndarray, events_b: np.ndarray) -> float:
-        """階層的同期計算"""
+        """階層的同期計算（構造変化の同時発生）"""
         if np.sum(events_a) > 0 and np.sum(events_b) > 0:
-            return np.sum(events_a * events_b) / min(np.sum(events_a), np.sum(events_b))
+            simultaneous = events_a & events_b
+            return np.sum(simultaneous) / np.sqrt(np.sum(events_a) * np.sum(events_b))
         return 0.0
     
     def _calculate_cross_scale_interaction(self, local_events: np.ndarray, global_events: np.ndarray) -> float:
-        """クロススケール相互作用計算"""
+        """クロススケール相互作用計算（局所→大域の遅延効果）"""
         if np.sum(local_events) > 0 and np.sum(global_events) > 0:
             # 局所イベントが大域イベントに先行する確率
             interaction = 0.0
             for lag in range(1, min(10, len(local_events) // 10)):
-                if lag < len(global_events):
-                    lagged_interaction = np.sum(local_events[:-lag] * global_events[lag:])
-                    interaction = max(interaction, lagged_interaction / (np.sum(local_events[:-lag]) + 1e-8))
+                if lag < len(global_events) and np.sum(local_events[:-lag]) > 0:
+                    joint = np.sum(local_events[:-lag] & global_events[lag:])
+                    marginal = np.sum(local_events[:-lag])
+                    interaction = max(interaction, joint / marginal)
             return interaction
         return 0.0
     
@@ -1104,7 +1147,7 @@ class PairwiseAnalyzer:
         components_b: Dict[str, Any],
         min_length: int
     ) -> Tuple[Any, Any]:
-        """Lambda³ベイズモデル推定"""
+        """Lambda³ベイズモデル推定（構造変化ベース）"""
         
         # 構造テンソル成分の準備
         delta_pos_a = components_a['delta_pos'][:min_length]
@@ -1114,6 +1157,10 @@ class PairwiseAnalyzer:
         delta_pos_b = components_b['delta_pos'][:min_length]
         delta_neg_b = components_b['delta_neg'][:min_length]
         rho_b = components_b['rho_T'][:min_length]
+        
+        # 変化率の計算
+        delta_rho_a = np.diff(rho_a, prepend=rho_a[0])
+        delta_rho_b = np.diff(rho_b, prepend=rho_b[0])
         
         with pm.Model() as model:
             # === 構造相互作用パラメータ ===
@@ -1133,26 +1180,28 @@ class PairwiseAnalyzer:
             gamma_struct_to_tension_a = pm.Normal('gamma_struct_to_tension_a', mu=0, sigma=1)
             gamma_struct_to_tension_b = pm.Normal('gamma_struct_to_tension_b', mu=0, sigma=1)
             
-            # === 張力モデル ===
-            # A系列の張力
-            mu_rho_a = (
-                gamma_struct_to_tension_a * (delta_pos_a + delta_neg_a) +
-                beta_tension_ba * rho_b
+            # === 張力変化率モデル ===
+            # A系列の張力変化率
+            mu_delta_rho_a = (
+                gamma_struct_to_tension_a * (delta_pos_a - delta_neg_a) +
+                beta_tension_ba * delta_rho_b
             )
             
-            # B系列の張力
-            mu_rho_b = (
-                gamma_struct_to_tension_b * (delta_pos_b + delta_neg_b) +
-                beta_tension_ab * rho_a
+            # B系列の張力変化率
+            mu_delta_rho_b = (
+                gamma_struct_to_tension_b * (delta_pos_b - delta_neg_b) +
+                beta_tension_ab * delta_rho_a
             )
             
             # ノイズパラメータ
             sigma_rho_a = pm.HalfNormal('sigma_rho_a', sigma=1)
             sigma_rho_b = pm.HalfNormal('sigma_rho_b', sigma=1)
             
-            # 観測モデル
-            obs_rho_a = pm.Normal('obs_rho_a', mu=mu_rho_a, sigma=sigma_rho_a, observed=rho_a)
-            obs_rho_b = pm.Normal('obs_rho_b', mu=mu_rho_b, sigma=sigma_rho_b, observed=rho_b)
+            # 観測モデル（変化率を観測）
+            obs_delta_rho_a = pm.Normal('obs_delta_rho_a', mu=mu_delta_rho_a, 
+                                       sigma=sigma_rho_a, observed=delta_rho_a)
+            obs_delta_rho_b = pm.Normal('obs_delta_rho_b', mu=mu_delta_rho_b, 
+                                       sigma=sigma_rho_b, observed=delta_rho_b)
             
             # サンプリング
             trace = pm.sample(
