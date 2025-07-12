@@ -1,24 +1,23 @@
 # ==========================================================
-# pyproject.toml - Lambda³ Finance Analyzer Modern Configuration (修正版)
+# pyproject.toml - Lambda³ Finance Analyzer Configuration
 # 
 # Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
-# 修正ポイント: 重複セクション完全除去、パッケージ発見の最適化
+# プロジェクトナレッジの実際のコードに基づく設定
 # ==========================================================
 
 [build-system]
 requires = [
     "setuptools>=61.0",
     "wheel>=0.37.0",
-    "setuptools-scm>=6.0",
     "numpy>=1.21.0",  # ビルド時にNumPyが必要（JIT最適化用）
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lambda3"
-dynamic = ["version"]
+version = "0.2.0"  # lambda3/__init__.pyより
 description = "Lambda³ Theory: Advanced Financial Analysis with Structural Tensors and JIT Optimization"
 readme = "README.md"
 license = {text = "MIT"}
@@ -39,12 +38,11 @@ keywords = [
     "crisis-detection",
     "market-analysis",
     "numba",
-    "mathematical-finance",
 ]
 
 classifiers = [
     # 開発状況
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     
     # 対象ユーザー
     "Intended Audience :: Financial and Insurance Industry",
@@ -55,7 +53,6 @@ classifiers = [
     "Topic :: Office/Business :: Financial",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Information Analysis",
-    "Topic :: Software Development :: Libraries :: Python Modules",
     
     # ライセンス
     "License :: OSI Approved :: MIT License",
@@ -67,112 +64,80 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3 :: Only",
     
     # OS
     "Operating System :: OS Independent",
-    "Operating System :: Microsoft :: Windows",
-    "Operating System :: POSIX :: Linux", 
-    "Operating System :: MacOS",
-    
-    # 環境
-    "Environment :: Console",
-    "Environment :: Jupyter",
-    "Natural Language :: English",
-    "Natural Language :: Japanese",
 ]
 
 requires-python = ">=3.8"
 
 dependencies = [
-    # 数値計算基盤
-    "numpy>=1.21.0",
-    "scipy>=1.7.0", 
-    "pandas>=1.3.0",
-    
-    # JIT最適化（核心機能）
-    "numba>=0.56.0",
-    
-    # 基本可視化
-    "matplotlib>=3.5.0",
-    "seaborn>=0.11.0",
-    
-    # ユーティリティ
+    # requirements.txtの必須依存関係
+    "numpy>=1.21.0,<2.0.0",
+    "scipy>=1.7.0,<2.0.0", 
+    "pandas>=1.3.0,<3.0.0",
+    "numba>=0.56.0,<1.0.0",
+    "matplotlib>=3.5.0,<4.0.0",
+    "seaborn>=0.11.0,<1.0.0",
     "typing-extensions>=4.0.0",
 ]
 
 [project.optional-dependencies]
-# ベイズ分析（高度統計機能）
+# requirements.txtから実際に存在する依存関係のみ
 bayesian = [
-    "pymc>=5.0.0",
-    "arviz>=0.14.0", 
-    "theano-pymc>=1.1.0",
+    "pymc>=5.0.0,<6.0.0",
+    "arviz>=0.14.0,<1.0.0", 
+    "theano-pymc>=1.1.0,<2.0.0",
+    "statsmodels>=0.13.0,<1.0.0",
 ]
 
-# 金融データ取得
 financial = [
-    "yfinance>=0.2.0",
-    "pandas-datareader>=0.10.0",
-    "quandl>=3.7.0",
+    "yfinance>=0.2.0,<1.0.0",
+    "pandas-datareader>=0.10.0,<1.0.0",
+    "quandl>=3.7.0,<4.0.0",
+    "alpha-vantage>=2.3.0,<3.0.0",
+    "fredapi>=0.5.0,<1.0.0",
 ]
 
-# 高度可視化
 visualization = [
-    "plotly>=5.0.0",
-    "dash>=2.0.0",
-    "bokeh>=2.4.0", 
-    "ipywidgets>=7.6.0",
+    "plotly>=5.0.0,<6.0.0",
+    "dash>=2.0.0,<3.0.0",
+    "bokeh>=2.4.0,<4.0.0", 
+    "ipywidgets>=7.6.0,<9.0.0",
 ]
 
-# ネットワーク分析
 network = [
-    "networkx>=2.6.0",
-    "igraph>=0.9.0",
+    "networkx>=2.6.0,<4.0.0",
+    "igraph>=0.9.0,<1.0.0",
 ]
 
-# 機械学習拡張
 ml = [
-    "scikit-learn>=1.0.0",
-    "tensorflow>=2.8.0",
-    "torch>=1.11.0",
+    "scikit-learn>=1.0.0,<2.0.0",
+    "sktime>=0.15.0,<1.0.0",
+    "pmdarima>=2.0.0,<3.0.0",
 ]
 
-# 開発・テスト
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-benchmark>=4.0.0",
-    "black>=22.0.0",
-    "flake8>=4.0.0",
-    "mypy>=0.950",
-    "sphinx>=4.5.0", 
-    "sphinx-rtd-theme>=1.0.0",
-    "pre-commit>=2.20.0",
+    "pytest>=7.0.0,<9.0.0",
+    "pytest-cov>=4.0.0,<5.0.0",
+    "pytest-benchmark>=4.0.0,<5.0.0",
+    "black>=22.0.0,<25.0.0",
+    "flake8>=4.0.0,<8.0.0",
+    "mypy>=0.950,<2.0.0",
+    "isort>=5.10.0,<6.0.0",
+    "pre-commit>=2.20.0,<4.0.0",
 ]
 
-# 性能分析
-performance = [
-    "memory-profiler>=0.60.0",
-    "line-profiler>=3.5.0", 
-    "py-spy>=0.3.0",
-]
-
-# Jupyter環境
 jupyter = [
     "jupyter>=1.0.0",
-    "jupyterlab>=3.4.0",
-    "ipython>=8.0.0",
-    "notebook>=6.4.0",
+    "jupyterlab>=3.4.0,<5.0.0",
+    "notebook>=6.4.0,<8.0.0",
+    "ipywidgets>=7.6.0,<9.0.0",
 ]
 
 # 完全インストール
 complete = [
     "lambda3[bayesian,financial,visualization,network,ml,jupyter]"
-]
-
-# 最小インストール
-minimal = [
-    "lambda3[financial,visualization]"
 ]
 
 [project.urls]
@@ -181,29 +146,19 @@ Repository = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer"
 "Bug Tracker" = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues"
 Discussions = "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/discussions"
 
-[project.scripts]
-lambda3 = "lambda3.cli:main"
-lambda3-analyze = "lambda3.cli:analyze_command"
-lambda3-financial = "lambda3.cli:financial_command"
-lambda3-benchmark = "lambda3.cli:benchmark_command"
-
 # ==========================================================
-# SETUPTOOLS CONFIGURATION - パッケージ発見の最適化（単一セクション）
+# SETUPTOOLS CONFIGURATION
 # ==========================================================
 
 [tool.setuptools]
-# パッケージ自動発見（修正版）
-# packages = ["lambda3"] # 自動発見を優先するため、明示的なpackages指定を削除
 include-package-data = true
 zip-safe = false
 
-# パッケージ自動発見設定
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lambda3*"]
 exclude = ["tests*", "docs*", "examples*", "scripts*"]
 
-# パッケージデータ包含
 [tool.setuptools.package-data]
 lambda3 = [
     "*.txt",
@@ -212,46 +167,18 @@ lambda3 = [
     "*.yaml",
     "*.json",
     "data/**/*",
-    "config/**/*",
-    # "tests/**/*", # テストファイルは配布物から除外
+    "configs/**/*",
 ]
 
 # ==========================================================
 # DEVELOPMENT TOOLS CONFIGURATION
 # ==========================================================
 
-# Setuptools SCM バージョン管理
-[tool.setuptools_scm]
-write_to = "lambda3/_version.py"
-version_scheme = "post-release"
-local_scheme = "no-local-version"
-
 # Black コードフォーマッター
 [tool.black]
 line-length = 100
 target-version = ["py38", "py39", "py310", "py311", "py312"]
 include = "\\.pyi?$"
-extend-exclude = '''
-/(
-    # 標準除外
-    \\.eggs
-  | \\.git
-  | \\.hg
-  | \\.mypy_cache
-  | \\.tox
-  | \\.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-  | migrations
-  
-# Lambda³専用除外
-  | lambda3/_version\\.py
-  | docs/
-  | examples/legacy/
-)/
-'''
 
 # isort インポート整理
 [tool.isort]
@@ -259,33 +186,14 @@ profile = "black"
 multi_line_output = 3
 line_length = 100
 known_first_party = ["lambda3"]
-known_third_party = [
-    "numpy", "scipy", "pandas", "numba", "matplotlib", "seaborn",
-    "pymc", "arviz", "sklearn", "tensorflow", "torch", "yfinance"
-]
-skip_glob = [
-    "lambda3/_version.py",
-    "docs/*",
-    "examples/legacy/*"
-]
 
 # MyPy 静的型検査
 [tool.mypy]
 python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
 check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
 
-# Lambda³専用MyPy設定
 [[tool.mypy.overrides]]
 module = [
     "numba.*",
@@ -293,76 +201,22 @@ module = [
     "arviz.*",
     "yfinance.*",
     "pandas_datareader.*",
-    "quandl.*",
     "plotly.*",
-    "dash.*",
-    "bokeh.*",
     "networkx.*",
-    "igraph.*",
     "sklearn.*",
-    "tensorflow.*",
-    "torch.*",
 ]
 ignore_missing_imports = true
 
-# Pytest テスト設定
-[tool.pytest.ini_options]
-minversion = "7.0"
-addopts = [
-    "-ra",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=lambda3",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
-]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
-    "benchmark: marks tests as benchmark tests",
-    "jit: marks tests as JIT-related tests",
-    "bayesian: marks tests as Bayesian analysis tests",
-    "financial: marks tests as financial analysis tests",
-    "visualization: marks tests as visualization tests",
-]
-filterwarnings = [
-    "error",
-    "ignore::UserWarning",
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-]
+# Pytest テスト設定（将来のテスト実装時用）
+# [tool.pytest.ini_options]
+# minversion = "7.0"
+# addopts = [
+#     "-ra",
+#     "--strict-markers",
+# ]
+# testpaths = ["tests"]
 
-# Coverage 設定
-[tool.coverage.run]
-source = ["lambda3"]
-omit = [
-    "tests/*",
-    "setup.py",
-    "lambda3/__init__.py",
-]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
-
-# Bandit セキュリティ検査
-[tool.bandit]
-exclude_dirs = ["tests", "docs", "examples"]
-skips = ["B101", "B601"]  # assert文とshell=Trueの使用を許可
+# Coverage 設定（将来のテスト実装時用）
+# [tool.coverage.run]
+# source = ["lambda3"]
+# branch = true
