@@ -5,7 +5,7 @@
 # Author: Masamichi Iizumi (Miosync, Inc.)
 # License: MIT
 #
-# 完全修正版: エスカレーション/デエスカレーション、ベイズ階層モデル
+# 完全修正版: paste.txtとの完全整合性確保
 # ==========================================================
 
 """
@@ -16,10 +16,10 @@ Lambda³階層構造分析（完全修正版）
 分離と相互作用を完全にモデル化。
 
 完全修正内容:
-- 階層分離係数の理論準拠計算
-- ベイズ階層モデルの完全実装
+- paste.txt準拠の階層分離係数計算
+- ベイズ階層モデルの理論準拠実装
 - JIT関数との完全統合
-- 非対称性メトリクスの拡張
+- 非対称性メトリクスの統一
 """
 
 import numpy as np
@@ -44,7 +44,8 @@ try:
         detect_local_global_jumps,
         calculate_rho_t,
         normalize_array_fixed,
-        moving_average_fixed
+        moving_average_fixed,
+        calc_lambda3_features_v2
     )
     JIT_AVAILABLE = True
 except ImportError:
@@ -61,7 +62,7 @@ except ImportError:
 # Type imports
 try:
     from ..core.structural_tensor import StructuralTensorProtocol
-    from ..types.core import Lambda3Error
+    from ..core.types import Lambda3Error
     TYPES_AVAILABLE = True
 except ImportError:
     TYPES_AVAILABLE = False
@@ -111,6 +112,12 @@ class HierarchicalSeparationResults:
     analysis_method: str = "standard"
     processing_time: float = 0.0
     config_params: Dict[str, Any] = field(default_factory=dict)
+    
+    # paste.txt準拠の追加フィールド
+    trace: Optional[Any] = None  # ベイズトレースのエイリアス
+    model: Optional[Any] = None  # ベイズモデル
+    local_series: Optional[np.ndarray] = None  # ローカル系列
+    global_series: Optional[np.ndarray] = None  # グローバル系列
     
     def get_escalation_strength(self) -> float:
         """エスカレーション強度取得"""
@@ -183,15 +190,16 @@ class HierarchicalAnalyzer:
         if CONFIG_AVAILABLE:
             return L3HierarchicalConfig()
         else:
-            # フォールバック設定
+            # フォールバック設定（paste.txt準拠）
             return type('Config', (), {
                 'local_window': 5,
                 'global_window': 30,
                 'local_percentile': 90.0,
                 'global_percentile': 95.0,
                 'min_events_threshold': 10,
-                'bayesian_draws': 4000,
-                'bayesian_tune': 2000
+                'bayesian_draws': 8000,
+                'bayesian_tune': 8000,
+                'target_accept': 0.95
             })()
     
     def analyze_hierarchical_separation(
@@ -302,10 +310,10 @@ class HierarchicalAnalyzer:
                     self.config.global_percentile
                 )
                 hier_features = {
-                    'local_pos': local_pos,
-                    'local_neg': local_neg,
-                    'global_pos': global_pos,
-                    'global_neg': global_neg
+                    'local_pos': local_pos.astype(np.float64),
+                    'local_neg': local_neg.astype(np.float64),
+                    'global_pos': global_pos.astype(np.float64),
+                    'global_neg': global_neg.astype(np.float64)
                 }
             else:
                 # 純Python実装
@@ -330,8 +338,8 @@ class HierarchicalAnalyzer:
         diff = np.diff(data, prepend=data[0])
         
         # ローカル検出
-        local_pos = np.zeros(n)
-        local_neg = np.zeros(n)
+        local_pos = np.zeros(n, dtype=np.float64)
+        local_neg = np.zeros(n, dtype=np.float64)
         
         for i in range(n):
             local_start = max(0, i - self.config.local_window)
@@ -347,8 +355,8 @@ class HierarchicalAnalyzer:
         
         # グローバル検出
         global_threshold = np.percentile(np.abs(diff), self.config.global_percentile)
-        global_pos = (diff > global_threshold).astype(float)
-        global_neg = (diff < -global_threshold).astype(float)
+        global_pos = (diff > global_threshold).astype(np.float64)
+        global_neg = (diff < -global_threshold).astype(np.float64)
         
         return {
             'local_pos': local_pos,
@@ -425,7 +433,7 @@ class HierarchicalAnalyzer:
         features: Dict[str, np.ndarray],
         series_name: str
     ) -> HierarchicalSeparationResults:
-        """ベイズ階層分析"""
+        """ベイズ階層分析（paste.txt準拠）"""
         print("\nPerforming Bayesian hierarchical analysis...")
         
         # ベイズモデル構築と推定
@@ -442,6 +450,10 @@ class HierarchicalAnalyzer:
         asymmetry_metrics = self._calculate_asymmetry_metrics(features)
         hierarchy_stats = self._calculate_hierarchy_statistics(features)
         
+        # 階層系列の準備（paste.txt準拠）
+        local_rho_T = features['rho_T'] * ((features['local_pos'] + features['local_neg']) > 0).astype(float)
+        global_rho_T = features['rho_T'] * ((features['global_pos'] + features['global_neg']) > 0).astype(float)
+        
         # 結果構築
         results = HierarchicalSeparationResults(
             series_name=series_name,
@@ -457,7 +469,12 @@ class HierarchicalAnalyzer:
             hierarchy_stats=hierarchy_stats,
             analysis_method='bayesian',
             bayesian_trace=trace,
-            bayesian_summary=az.summary(trace).to_dict()
+            bayesian_summary=az.summary(trace).to_dict() if BAYESIAN_AVAILABLE else None,
+            # paste.txt準拠の追加フィールド
+            trace=trace,
+            model=model,
+            local_series=local_rho_T,
+            global_series=global_rho_T
         )
         
         return results
@@ -526,7 +543,7 @@ class HierarchicalAnalyzer:
         self,
         features: Dict[str, np.ndarray]
     ) -> Dict[str, float]:
-        """非対称性メトリクスの計算"""
+        """非対称性メトリクスの計算（paste.txt準拠）"""
         # 正負イベントの非対称性
         local_pos_count = np.sum(features['local_pos'])
         local_neg_count = np.sum(features['local_neg'])
@@ -540,12 +557,22 @@ class HierarchicalAnalyzer:
         # 階層間非対称性
         hierarchy_asymmetry = abs(local_asymmetry - global_asymmetry)
         
+        # paste.txt準拠の追加メトリクス
+        separation_coeffs = self._calculate_separation_coefficients(features)
+        transition_asymmetry = abs(separation_coeffs['escalation']) - abs(separation_coeffs['deescalation'])
+        escalation_dominance = abs(separation_coeffs['escalation']) / (abs(separation_coeffs['escalation']) + abs(separation_coeffs['deescalation']) + 1e-8)
+        deescalation_dominance = abs(separation_coeffs['deescalation']) / (abs(separation_coeffs['escalation']) + abs(separation_coeffs['deescalation']) + 1e-8)
+        
         return {
             'local_asymmetry': local_asymmetry,
             'global_asymmetry': global_asymmetry,
             'hierarchy_asymmetry': hierarchy_asymmetry,
             'local_pos_ratio': local_pos_count / max(local_pos_count + local_neg_count, 1),
-            'global_pos_ratio': global_pos_count / max(global_pos_count + global_neg_count, 1)
+            'global_pos_ratio': global_pos_count / max(global_pos_count + global_neg_count, 1),
+            # paste.txt準拠の追加
+            'transition_asymmetry': transition_asymmetry,
+            'escalation_dominance': escalation_dominance,
+            'deescalation_dominance': deescalation_dominance
         }
     
     def _calculate_hierarchy_statistics(
@@ -564,13 +591,27 @@ class HierarchicalAnalyzer:
         local_persistence = self._calculate_event_persistence(local_events)
         global_persistence = self._calculate_event_persistence(global_events)
         
+        # paste.txt準拠の追加統計
+        local_mask = local_events > 0
+        global_mask = global_events > 0
+        
+        local_mean = np.mean(features['rho_T'][local_mask]) if np.any(local_mask) else 0.0
+        global_mean = np.mean(features['rho_T'][global_mask]) if np.any(global_mask) else 0.0
+        local_std = np.std(features['rho_T'][local_mask]) if np.any(local_mask) else 0.0
+        global_std = np.std(features['rho_T'][global_mask]) if np.any(global_mask) else 0.0
+        
         return {
             'local_frequency': local_frequency,
             'global_frequency': global_frequency,
             'frequency_ratio': global_frequency / max(local_frequency, 1e-8),
             'local_persistence': local_persistence,
             'global_persistence': global_persistence,
-            'persistence_ratio': global_persistence / max(local_persistence, 1e-8)
+            'persistence_ratio': global_persistence / max(local_persistence, 1e-8),
+            # paste.txt準拠の追加
+            'local_mean': local_mean,
+            'global_mean': global_mean,
+            'local_std': local_std,
+            'global_std': global_std
         }
     
     def _calculate_event_persistence(self, events: np.ndarray) -> float:
@@ -594,61 +635,61 @@ class HierarchicalAnalyzer:
         data: np.ndarray,
         features: Dict[str, np.ndarray]
     ) -> Tuple[Any, Any]:
-        """ベイズ階層モデルの構築と推定"""
+        """ベイズ階層モデルの構築と推定（paste.txt準拠）"""
         local_events = features['local_pos'] + features['local_neg']
         global_events = features['global_pos'] + features['global_neg']
         rho_t = features['rho_T']
         
+        # paste.txt準拠の階層特徴量準備
+        time_trend = np.arange(len(data))
+        local_rho_T = rho_t * (local_events > 0).astype(float)
+        global_rho_T = rho_t * (global_events > 0).astype(float)
+        
+        # エスカレーション/デエスカレーション指標
+        escalation_indicator = np.zeros(len(data))
+        deescalation_indicator = np.zeros(len(data))
+        
+        for i in range(1, len(data)-1):
+            if local_events[i-1] > 0 and global_events[i] > 0:
+                escalation_indicator[i] = 1
+            if global_events[i-1] > 0 and local_events[i] > 0 and global_events[i] == 0:
+                deescalation_indicator[i] = 1
+        
         with pm.Model() as model:
-            # === 階層構造パラメータ ===
-            # エスカレーション/デエスカレーション係数
-            beta_escalation = pm.Normal('beta_escalation', mu=0, sigma=1)
-            beta_deescalation = pm.Normal('beta_deescalation', mu=0, sigma=1)
+            # === 基本項 ===
+            beta_0 = pm.Normal('beta_0', mu=0, sigma=2)
+            beta_time = pm.Normal('beta_time', mu=0, sigma=1)
             
-            # 階層効果係数
+            # === 階層効果係数 ===
             alpha_local = pm.Normal('alpha_local', mu=0, sigma=1.5)
             alpha_global = pm.Normal('alpha_global', mu=0, sigma=2)
             
-            # 階層間相互作用
+            # === 階層遷移係数 ===
+            beta_escalation = pm.Normal('beta_escalation', mu=0, sigma=1)
+            beta_deescalation = pm.Normal('beta_deescalation', mu=0, sigma=1)
+            
+            # === 階層間相互作用 ===
             rho_hierarchy = pm.Uniform('rho_hierarchy', lower=-1, upper=1)
             
-            # === 構造方程式 ===
-            # 時間トレンド
-            time_trend = np.arange(len(data)) / len(data)
-            beta_time = pm.Normal('beta_time', mu=0, sigma=0.5)
-            
-            # ベースライン
-            beta_0 = pm.Normal('beta_0', mu=np.mean(data), sigma=np.std(data))
-            
-            # エスカレーション/デエスカレーション指標
-            escalation_indicator = np.zeros(len(data))
-            deescalation_indicator = np.zeros(len(data))
-            
-            for i in range(1, len(data)-1):
-                if local_events[i-1] > 0 and global_events[i] > 0:
-                    escalation_indicator[i] = 1
-                if global_events[i-1] > 0 and local_events[i] > 0 and global_events[i] == 0:
-                    deescalation_indicator[i] = 1
-            
-            # 構造テンソル平均モデル
+            # === 構造テンソル平均モデル ===
             mu = (
                 beta_0
                 + beta_time * time_trend
-                + alpha_local * local_events * rho_t
-                + alpha_global * global_events * rho_t
+                + alpha_local * local_rho_T
+                + alpha_global * global_rho_T
                 + beta_escalation * escalation_indicator
                 + beta_deescalation * deescalation_indicator
             )
             
-            # 観測モデル
-            sigma_obs = pm.HalfNormal('sigma_obs', sigma=np.std(data))
+            # === 観測モデル ===
+            sigma_obs = pm.HalfNormal('sigma_obs', sigma=1)
             y_obs = pm.Normal('y_obs', mu=mu, sigma=sigma_obs, observed=data)
             
             # サンプリング
             trace = pm.sample(
                 draws=self.config.bayesian_draws,
                 tune=self.config.bayesian_tune,
-                target_accept=0.95,
+                target_accept=self.config.target_accept,
                 return_inferencedata=True,
                 cores=4,
                 chains=4
@@ -808,6 +849,136 @@ def _print_comparison_summary(results: Dict[str, HierarchicalSeparationResults])
               f"{result.get_dominant_hierarchy():<15}")
 
 # ==========================================================
+# ANALYSIS FUNCTIONS FOR PASTE.TXT COMPATIBILITY
+# ==========================================================
+
+def prepare_hierarchical_features_for_bayesian(
+    structural_changes: Dict[str, np.ndarray],
+    original_data: np.ndarray,
+    config: Any
+) -> Dict[str, np.ndarray]:
+    """
+    階層的構造変化特徴量をベイズモデル用に準備（paste.txt準拠）
+    Lambda³理論: JITで検出された階層的構造変化を直接使用
+    """
+    # 既存の階層的構造変化を直接使用
+    local_pos = structural_changes.get('local_pos', np.zeros_like(original_data, dtype=np.float64))
+    local_neg = structural_changes.get('local_neg', np.zeros_like(original_data, dtype=np.float64))
+    global_pos = structural_changes.get('global_pos', np.zeros_like(original_data, dtype=np.float64))
+    global_neg = structural_changes.get('global_neg', np.zeros_like(original_data, dtype=np.float64))
+
+    rho_T = structural_changes.get('rho_T', calculate_rho_t(original_data, config.window))
+    time_trend = structural_changes.get('time_trend', np.arange(len(original_data)))
+
+    # 統合構造変化
+    combined_pos = np.maximum(local_pos, global_pos)
+    combined_neg = np.maximum(local_neg, global_neg)
+
+    # 階層別イベントマスク
+    local_events_mask = (local_pos + local_neg) > 0
+    global_events_mask = (global_pos + global_neg) > 0
+
+    print(f"  階層的構造変化イベント:")
+    print(f"    短期: {np.sum(local_events_mask)}")
+    print(f"    長期: {np.sum(global_events_mask)}")
+    print(f"    短期位置: {np.where(local_events_mask)[0][:5]}...")
+    print(f"    長期位置: {np.where(global_events_mask)[0][:5]}...")
+    print(f"    統合正構造変化: {np.sum(combined_pos)}")
+    print(f"    統合負構造変化: {np.sum(combined_neg)}")
+
+    # ベイズモデル用特徴量
+    hierarchical_features = {
+        'delta_LambdaC_pos': combined_pos,
+        'delta_LambdaC_neg': combined_neg,
+        'rho_T': rho_T,
+        'time_trend': time_trend,
+
+        # 階層別ρT（構造変化位置でのみ非ゼロ）
+        'local_rho_T': rho_T * local_events_mask.astype(float),
+        'global_rho_T': rho_T * global_events_mask.astype(float),
+
+        # 階層遷移指標
+        'escalation_indicator': np.diff(np.concatenate([[0], global_events_mask.astype(float)])),
+        'deescalation_indicator': np.diff(np.concatenate([[0], local_events_mask.astype(float)]))
+    }
+
+    return hierarchical_features
+
+def analyze_hierarchical_separation_dynamics(
+    series_name: str,
+    original_data: np.ndarray,
+    structural_changes: Dict[str, np.ndarray],
+    config: Any
+) -> Dict[str, Any]:
+    """
+    階層分離ダイナミクス分析（paste.txt準拠）
+    短期・長期構造変化の分離分析
+    """
+    print(f"\n{'='*60}")
+    print(f"HIERARCHICAL SEPARATION DYNAMICS: {series_name}")
+    print(f"{'='*60}")
+    
+    # 階層分析器を使用
+    analyzer = HierarchicalAnalyzer(config=config)
+    
+    # 構造変化を特徴量として準備
+    features = structural_changes.copy()
+    features['series_name'] = series_name
+    features['data'] = original_data
+    
+    # ベイズ分析実行
+    results = analyzer.analyze_hierarchical_separation(
+        features, 
+        use_bayesian=True,
+        data=original_data
+    )
+    
+    # paste.txt形式の結果を返す
+    return {
+        'trace': results.trace,
+        'model': results.model,
+        'separation_coefficients': results.separation_coefficients.get('bayesian', {}),
+        'asymmetry_metrics': results.asymmetry_metrics,
+        'hierarchy_stats': results.hierarchy_stats,
+        'local_series': results.local_series,
+        'global_series': results.global_series,
+        'series_name': series_name
+    }
+
+# ==========================================================
+# VISUALIZATION - 可視化関数
+# ==========================================================
+
+def plot_hierarchical_separation_analysis(
+    results: Dict[str, Any],
+    structural_changes: Dict[str, np.ndarray]
+):
+    """階層分離分析の可視化（paste.txt準拠）"""
+    try:
+        import matplotlib.pyplot as plt
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # プロット実装（簡略版）
+        ax1 = axes[0, 0]
+        ax1.set_title('Hierarchical Separation Dynamics')
+        
+        ax2 = axes[0, 1]
+        ax2.set_title('Escalation/Deescalation')
+        
+        ax3 = axes[1, 0]
+        ax3.set_title('Local vs Global Effects')
+        
+        ax4 = axes[1, 1]
+        ax4.set_title('Asymmetry Metrics')
+        
+        plt.tight_layout()
+        plt.show()
+        
+    except ImportError:
+        print("Matplotlib not available for visualization")
+
+# ==========================================================
 # VALIDATION & TESTING - 検証・テスト
 # ==========================================================
 
@@ -883,6 +1054,11 @@ __all__ = [
     # 関数
     'analyze_hierarchical_structure',
     'compare_hierarchical_dynamics',
+    
+    # paste.txt互換関数
+    'prepare_hierarchical_features_for_bayesian',
+    'analyze_hierarchical_separation_dynamics',
+    'plot_hierarchical_separation_analysis',
     
     # テスト
     'test_hierarchical_analysis'
