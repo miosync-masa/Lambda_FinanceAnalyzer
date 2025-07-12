@@ -1,47 +1,45 @@
-# Lambda³ Real Data Integration 🌍
+# Lambda³ Real Data Acquisition System 🌍
 
-## 🚀 New: Comprehensive Real Data Acquisition System
+## 📁 Data Directory Overview
 
-Lambda³ now includes a powerful real data acquisition system that seamlessly integrates with the structural tensor analysis framework.
+This directory contains Lambda³'s comprehensive real data acquisition and management system, enabling seamless integration between live financial markets and structural tensor analysis.
 
-### 📊 Supported Data Sources
+### 📂 Directory Structure
 
-| **Source** | **Coverage** | **Data Types** | **Update Frequency** |
-|------------|--------------|----------------|---------------------|
-| **Yahoo Finance** | Global | Stocks, FX, Commodities, Indices | Real-time |
-| **FRED** | US Economic | GDP, Inflation, Employment, Rates | Monthly/Quarterly |
-| **Quandl** | Global Financial | Alternative data, Economics | Varies |
-| **Alpha Vantage** | Global | High-frequency, Fundamentals | Real-time |
-| **Custom Files** | Any | CSV, Excel | Manual |
-| **Streaming** | Real-time | Live prices | Seconds |
-
-### 🔥 Quick Start: Real Data → Lambda³ Analysis
-
-```python
-import lambda3 as l3
-from lambda3.data.acquisition import quick_financial_data_fetch
-
-# 1. Fetch real market data (one line!)
-market_data = quick_financial_data_fetch(
-    start_date="2023-01-01",
-    asset_types=['US_Equities', 'Currencies', 'Commodities']
-)
-
-# 2. Run Lambda³ analysis directly
-results = l3.analyze(market_data, analysis_type='financial')
-
-# 3. View results
-print(results.get_analysis_summary())
+```
+lambda3/data/
+├── 📄 __init__.py              # Sample data generators & loaders
+├── 🌐 acquisition.py           # Real data acquisition system  
+├── 📊 README.md               # This documentation
+└── 🗂️ samples/               # Sample datasets (when generated)
+    ├── structural_changes/
+    ├── financial_portfolio/
+    ├── crisis_scenarios/
+    └── synthetic_markets/
 ```
 
-### 🌟 Advanced Multi-Market Analysis
+---
 
+## 🚀 Quick Start: Real Data → Lambda³ Analysis
+
+### One-Line Market Analysis
+```python
+from lambda3.data.acquisition import quick_financial_data_fetch
+import lambda3 as l3
+
+# Fetch real market data and analyze in one command
+market_data = quick_financial_data_fetch(asset_types=['US_Equities', 'Currencies'])
+results = l3.analyze(market_data, analysis_type='financial')
+print(f"Market structure quality: {results.get_analysis_summary()['overall_quality']:.3f}")
+```
+
+### Comprehensive Market Analysis
 ```python
 from lambda3.data.acquisition import Lambda3DataAcquisition, DataAcquisitionConfig
 
-# Configure comprehensive data acquisition
+# Configure data acquisition
 config = DataAcquisitionConfig(
-    start_date="2022-01-01",
+    start_date="2023-01-01",
     end_date="2024-12-31",
     outlier_detection=True,
     save_processed_data=True
@@ -53,648 +51,482 @@ acquisition = Lambda3DataAcquisition(config)
 # Fetch comprehensive market data
 market_data = acquisition.fetch_financial_markets_comprehensive()
 
-# Categories automatically include:
-# - US_Equities: S&P500, NASDAQ, Dow Jones, Russell 2000, VIX
-# - International_Equities: Nikkei225, FTSE100, DAX, CAC40, Hang Seng
-# - Bonds: US 10Y, 30Y, 2Y Treasury yields
-# - Commodities: Gold, Silver, Oil WTI, Copper
-# - Currencies: USD/JPY, EUR/USD, GBP/USD, USD/CHF
-
-# Run category-specific Lambda³ analysis
+# Run Lambda³ analysis on each category
 for category, data in market_data.items():
     results = l3.analyze(data, analysis_type='financial')
-    print(f"{category} quality: {results.get_analysis_summary()['overall_quality']:.3f}")
+    print(f"{category}: {results.get_analysis_summary()['overall_quality']:.3f}")
 ```
 
-### ₿ Cryptocurrency Analysis
+---
+
+## 📊 Supported Data Sources
+
+### 🏦 Financial Markets (via Yahoo Finance)
+
+| **Category** | **Examples** | **Update Frequency** |
+|--------------|--------------|---------------------|
+| **US Equities** | S&P500, NASDAQ, Dow Jones, Russell 2000, VIX | Real-time |
+| **International Equities** | Nikkei225, FTSE100, DAX, CAC40, Hang Seng | Real-time |
+| **Bonds** | US 10Y, 30Y, 2Y Treasury yields | Daily |
+| **Commodities** | Gold, Silver, Oil WTI, Copper | Real-time |
+| **Currencies** | USD/JPY, EUR/USD, GBP/USD, USD/CHF | Real-time |
+
+### 📈 Economic Indicators (via FRED)
+
+| **Indicator** | **FRED Code** | **Frequency** |
+|---------------|---------------|---------------|
+| GDP Growth | GDP | Quarterly |
+| Unemployment Rate | UNRATE | Monthly |
+| Inflation (CPI) | CPIAUCSL | Monthly |
+| Fed Funds Rate | FEDFUNDS | Daily |
+| Consumer Confidence | UMCSENT | Monthly |
+| Industrial Production | INDPRO | Monthly |
+
+### ₿ Cryptocurrency Markets
+
+| **Asset** | **Ticker** | **Features** |
+|-----------|------------|--------------|
+| Bitcoin | BTC-USD | Price, Volume, Volatility |
+| Ethereum | ETH-USD | Price, Volume, Log returns |
+| Solana | SOL-USD | Price, Volume, Moving averages |
+| Cardano | ADA-USD | Price, Volume, Technical indicators |
+
+---
+
+## 🔧 Core Classes & Functions
+
+### `Lambda3DataAcquisition`
+Main class for data acquisition and preprocessing.
 
 ```python
-# Fetch crypto markets
+from lambda3.data.acquisition import Lambda3DataAcquisition
+
+acquisition = Lambda3DataAcquisition()
+
+# Available methods:
+acquisition.fetch_financial_markets_comprehensive()    # All market categories
+acquisition.fetch_cryptocurrency_markets()             # Crypto data
+acquisition.fetch_commodities_complex()               # Commodities by category
+acquisition.fetch_fx_majors_and_crosses()            # Currency pairs
+acquisition.fetch_economic_indicators()               # FRED economic data
+acquisition.fetch_custom_data_from_file()            # CSV/Excel files
+```
+
+### `DataAcquisitionConfig`
+Configuration class for data acquisition settings.
+
+```python
+from lambda3.data.acquisition import DataAcquisitionConfig
+
+config = DataAcquisitionConfig(
+    start_date="2022-01-01",           # Data start date
+    end_date="2024-12-31",             # Data end date (None = today)
+    frequency="daily",                  # daily, weekly, monthly
+    adjust_prices=True,                 # Dividend/split adjustments
+    fill_missing_method="forward",      # Missing data handling
+    outlier_detection=True,             # Automatic outlier removal
+    outlier_threshold=5.0,              # Sigma threshold for outliers
+    min_data_points=50,                 # Minimum points for Lambda³
+    output_directory="./data_output",   # Save location
+    save_raw_data=True,                 # Save original data
+    save_processed_data=True,           # Save processed data
+    data_validation=True                # Enable data quality checks
+)
+```
+
+### Quick Functions
+
+```python
+# Quick market data fetch
+from lambda3.data.acquisition import quick_financial_data_fetch
+
+data = quick_financial_data_fetch(
+    start_date="2023-01-01",
+    asset_types=['US_Equities', 'Currencies', 'Commodities']
+)
+
+# Setup configuration helper
+from lambda3.data.acquisition import setup_data_acquisition_config
+
+config = setup_data_acquisition_config(
+    output_directory="./my_data",
+    frequency="daily",
+    outlier_detection=True
+)
+```
+
+---
+
+## 📋 Sample Data System
+
+### Built-in Sample Datasets
+
+Lambda³ includes comprehensive sample datasets for testing and learning:
+
+```python
+import lambda3 as l3
+
+# View available datasets
+print(l3.AVAILABLE_DATASETS)
+# Output: ['structural_changes', 'financial_portfolio', 'crisis_scenarios', 'synthetic_markets']
+
+# Load specific dataset
+structural_data = l3.load_sample_data("structural_changes")
+print(structural_data['metadata']['description'])
+
+# Access individual samples
+basic_jumps = structural_data['data']['basic_jumps']
+volatility_clusters = structural_data['data']['volatility_clustering']
+complex_patterns = structural_data['data']['complex_patterns']
+```
+
+### Sample Data Categories
+
+#### 1. **Structural Changes**
+```python
+structural_samples = l3.load_sample_data("structural_changes")
+# Contains:
+# - basic_jumps: Simple structural jump patterns
+# - volatility_clustering: GARCH-like volatility patterns  
+# - complex_patterns: Mixed structural change types
+```
+
+#### 2. **Financial Portfolio**
+```python
+portfolio_samples = l3.load_sample_data("financial_portfolio")
+# Contains:
+# - large_cap_stocks: Major US equities simulation
+# - sector_indices: Sector-based correlation structure
+# - currency_pairs: Major FX cross-rates
+```
+
+#### 3. **Crisis Scenarios**
+```python
+crisis_samples = l3.load_sample_data("crisis_scenarios")
+# Contains:
+# - mild_crisis: Low-severity market stress
+# - moderate_crisis: Medium-severity market stress
+# - severe_crisis: High-severity market stress (2008-like)
+```
+
+#### 4. **Synthetic Markets**
+```python
+synthetic_samples = l3.load_sample_data("synthetic_markets")
+# Contains:
+# - synthetic_market: 10-asset correlated market simulation
+```
+
+### Sample Data Generators
+
+```python
+from lambda3.data import Lambda3SampleDataGenerator
+
+generator = Lambda3SampleDataGenerator(random_seed=42)
+
+# Generate custom structural change series
+custom_series = generator.generate_structural_tensor_series(
+    n_points=500,
+    structural_changes=[
+        {'start': 100, 'end': 150, 'type': 'jump', 'magnitude': 0.5},
+        {'start': 300, 'end': 350, 'type': 'volatility_spike', 'magnitude': 3.0}
+    ]
+)
+
+# Generate financial portfolio
+portfolio = generator.generate_financial_portfolio(
+    assets=['Asset_A', 'Asset_B', 'Asset_C'],
+    n_points=252  # One year of daily data
+)
+
+# Generate crisis scenario
+crisis_data = generator.generate_crisis_scenario(
+    base_series=custom_series,
+    crisis_start=200,
+    crisis_duration=100,
+    crisis_severity=0.6
+)
+```
+
+---
+
+## 🌍 Real Data Examples
+
+### Example 1: US Equity Markets
+```python
+# Fetch US equity indices
+us_equities = {
+    'S&P500': '^GSPC',
+    'NASDAQ': '^IXIC', 
+    'Dow_Jones': '^DJI',
+    'Russell_2000': '^RUT',
+    'VIX': '^VIX'
+}
+
+acquisition = Lambda3DataAcquisition()
+equity_data = acquisition._fetch_yahoo_batch(us_equities)
+
+# Lambda³ analysis
+results = l3.analyze(equity_data, analysis_type='financial')
+print(f"US equity network density: {results.network_analysis['density']:.3f}")
+```
+
+### Example 2: Cryptocurrency Analysis
+```python
+# Fetch crypto markets with automatic preprocessing
 crypto_data = acquisition.fetch_cryptocurrency_markets()
 
 # Rapid screening for anomalies
-pipeline = l3.Lambda3ComprehensivePipeline(l3.create_config('rapid'))
+from lambda3.pipelines.comprehensive import Lambda3ComprehensivePipeline
+
+pipeline = Lambda3ComprehensivePipeline(l3.create_config('rapid'))
 screening = pipeline.run_rapid_screening(crypto_data, screening_threshold=0.3)
 
 print(f"Crypto anomalies detected: {len(screening['flagged_series'])}")
 ```
 
-### 🏭 Commodities Complex Analysis
-
+### Example 3: Commodities Complex
 ```python
 # Fetch commodities by category
 commodities = acquisition.fetch_commodities_complex()
 
-# Categories include:
-# - Energy: WTI Oil, Brent Oil, Natural Gas, Gasoline
-# - Precious Metals: Gold, Silver, Platinum, Palladium  
-# - Industrial Metals: Copper, Aluminum, Zinc
-# - Agriculture: Corn, Wheat, Soybeans, Sugar, Coffee
-
-# Analyze commodity networks
 for category, data in commodities.items():
-    results = l3.analyze(data, analysis_type='comprehensive')
-    if results.network_analysis:
-        density = results.network_analysis['density']
-        print(f"{category} network density: {density:.3f}")
+    if not data.empty:
+        results = l3.analyze(data, analysis_type='comprehensive')
+        print(f"{category} coupling strength: {np.mean([r.calculate_bidirectional_coupling() for r in results.pairwise_results.values()]):.3f}")
 ```
 
-### 💱 FX Cross-Rates Analysis
-
+### Example 4: Economic Indicators
 ```python
-# Fetch major and cross currency pairs
-fx_data = acquisition.fetch_fx_majors_and_crosses(
-    base_currencies=['USD', 'EUR', 'JPY', 'GBP'],
-    quote_currencies=['USD', 'EUR', 'JPY']
-)
-
-# FX-optimized Lambda³ analysis
-fx_config = l3.create_config('financial')
-fx_config.pairwise.causality_lag_window = 3  # Short-term FX causality
-
-results = l3.analyze(fx_data, config=fx_config)
-top_fx_interactions = results.get_top_interactions(5)
-```
-
-### 📈 Economic Indicators Integration
-
-```python
-# Fetch US economic indicators from FRED
+# Fetch FRED economic indicators
 economic_data = acquisition.fetch_economic_indicators()
 
-# Indicators include:
-# - GDP Growth, Unemployment Rate, Inflation (CPI)
-# - Fed Funds Rate, Consumer Confidence
-# - Industrial Production, Housing Starts, Retail Sales
-
-# High-precision research analysis
-research_config = l3.create_config('research')
-results = l3.analyze(economic_data, config=research_config)
-
-# Examine economic structure hierarchy
-hierarchy_rankings = results.get_hierarchy_rankings()
-print("Top economic escalation indicators:")
-for name, strength in hierarchy_rankings['escalation_strength'][:3]:
-    print(f"  {name}: {strength:.4f}")
+if not economic_data.empty:
+    # Research-grade analysis
+    research_config = l3.create_config('research')
+    results = l3.analyze(economic_data, config=research_config)
+    
+    # Check economic structure hierarchy
+    rankings = results.get_hierarchy_rankings()
+    print("Top economic escalation indicators:")
+    for name, strength in rankings['escalation_strength'][:3]:
+        print(f"  {name}: {strength:.4f}")
 ```
 
-### 📄 Custom Data Integration
-
+### Example 5: Custom Data Files
 ```python
-# Load custom CSV/Excel files
+# Load custom CSV file
 custom_data = acquisition.fetch_custom_data_from_file(
-    "your_market_data.csv",
+    "your_data.csv",
     date_column='Date',
     value_columns=['Asset1', 'Asset2', 'Asset3']
 )
 
-# Seamless Lambda³ analysis
-results = l3.analyze(custom_data, analysis_type='comprehensive')
+# Lambda³ analysis
+if not custom_data.empty:
+    results = l3.analyze(custom_data, analysis_type='comprehensive')
+    print(f"Custom data quality: {results.get_analysis_summary()['overall_quality']:.3f}")
 ```
 
-### 🔴 Real-time Data Streaming
+---
 
+## ⚡ Performance & Optimization
+
+### Data Acquisition Speed
+- **Yahoo Finance**: ~15s for 50 assets × 2 years
+- **FRED Economic**: ~25s for 20 indicators × 5 years  
+- **Cryptocurrency**: ~8s for 10 coins × 1 year
+- **Custom CSV**: ~2s for 100 series
+
+### Memory Efficiency
+- **Raw Data**: ~50MB for 50 assets × 2 years daily
+- **Processed Data**: ~75MB with returns/features
+- **Lambda³ Analysis**: ~25MB comprehensive results
+- **Total Workflow**: <200MB end-to-end
+
+### JIT Acceleration
+All data preprocessing leverages Numba JIT optimization:
+- **10-100x faster** numerical computations
+- **Automatic parallel processing** for large datasets
+- **Memory-optimized** data structures
+
+---
+
+## 🔧 Data Quality Features
+
+### Automatic Data Cleaning
+```python
+config = DataAcquisitionConfig(
+    fill_missing_method="forward",     # Handle missing values
+    outlier_detection=True,            # Remove statistical outliers
+    outlier_threshold=5.0,             # 5-sigma outlier threshold
+    data_validation=True               # Comprehensive validation
+)
+```
+
+### Data Validation
+```python
+from lambda3.data import validate_lambda3_data
+
+# Validate data for Lambda³ analysis
+validation_results = validate_lambda3_data(your_data)
+
+if validation_results['is_valid']:
+    print("✅ Data ready for Lambda³ analysis")
+else:
+    print("⚠️ Data issues detected:")
+    for issue in validation_results['issues']:
+        print(f"  - {issue}")
+```
+
+### Preprocessing Pipeline
+1. **Format Standardization**: Convert to numpy arrays
+2. **Missing Value Handling**: Forward fill, interpolation
+3. **Outlier Detection**: Statistical outlier identification
+4. **Data Type Optimization**: Float64 for JIT compatibility
+5. **Length Alignment**: Ensure consistent time series lengths
+6. **Lambda³ Optimization**: Prepare for structural tensor analysis
+
+---
+
+## 🔮 Advanced Features
+
+### Real-time Data Streaming
 ```python
 import asyncio
 
-# Real-time data acquisition (async)
-tickers = ['AAPL', 'GOOGL', 'MSFT', 'BTC-USD']
+# Real-time data acquisition
+tickers = ['AAPL', 'GOOGL', 'BTC-USD']
 realtime_data = await acquisition.fetch_realtime_data_stream(
     tickers=tickers,
     duration_minutes=60,
     update_interval_seconds=60
 )
 
-# Process streaming data with Lambda³
+# Process streaming data
 for ticker, data_points in realtime_data.items():
     prices = [point['price'] for point in data_points]
-    if len(prices) > 50:  # Minimum for Lambda³ analysis
+    if len(prices) > 50:
         features = l3.extract_features(prices, series_name=ticker)
-        print(f"{ticker} tension: {np.mean(features.rho_T):.4f}")
+        print(f"{ticker} current tension: {np.mean(features.rho_T):.4f}")
 ```
 
-## 🔧 Installation & Setup
-
-### Basic Installation
-```bash
-pip install lambda3[financial]  # Includes yfinance
-```
-
-### Full Data Capabilities
-```bash
-pip install lambda3[complete]  # All data sources
-```
-
-### Manual Dependencies
-```bash
-pip install yfinance pandas-datareader quandl alpha-vantage
-```
-
-### API Keys Setup (Optional)
+### Multi-timeframe Analysis
 ```python
-# For enhanced data access
-import os
-os.environ['QUANDL_API_KEY'] = 'your_quandl_key'
-os.environ['ALPHA_VANTAGE_KEY'] = 'your_alphavantage_key'
+# Analyze multiple timeframes
+timeframes = {
+    'daily': DataAcquisitionConfig(frequency="daily"),
+    'weekly': DataAcquisitionConfig(frequency="weekly"),
+    'monthly': DataAcquisitionConfig(frequency="monthly")
+}
+
+results = {}
+for tf, config in timeframes.items():
+    acq = Lambda3DataAcquisition(config)
+    data = acq.fetch_financial_markets_comprehensive()
+    results[tf] = l3.analyze(data, analysis_type='comprehensive')
 ```
 
-## 📊 Data Acquisition Configuration
-
+### Custom Data Source Integration
 ```python
-from lambda3.data.acquisition import DataAcquisitionConfig
-
-config = DataAcquisitionConfig(
-    start_date="2020-01-01",
-    end_date="2024-12-31",
-    frequency="daily",           # daily, weekly, monthly
-    adjust_prices=True,          # Dividend/split adjustments
-    fill_missing_method="forward", # forward, backward, interpolate
-    outlier_detection=True,      # Automatic outlier handling
-    outlier_threshold=5.0,       # Sigma threshold
-    min_data_points=50,          # Minimum for Lambda³ analysis
-    output_directory="./data",   # Auto-save location
-    save_raw_data=True,
-    save_processed_data=True,
-    data_validation=True
-)
-```
-
-## 🌟 Integration with Existing Lambda³ Workflows
-
-### 1. **Rapid Financial Screening**
-```python
-# High-speed market screening
-data = quick_financial_data_fetch(asset_types=['US_Equities'])
-pipeline = l3.Lambda3ComprehensivePipeline(l3.create_config('rapid'))
-screening = pipeline.run_rapid_screening(data)
-```
-
-### 2. **Research-Grade Analysis**
-```python
-# Maximum precision analysis
-config = l3.create_config('research')
-config.bayesian.draws = 15000  # High-quality MCMC
-results = l3.analyze(real_data, config=config)
-```
-
-### 3. **Financial Crisis Detection**
-```python
-# Crisis-focused analysis
-results = acquisition.fetch_financial_markets_comprehensive()
-crisis_analysis = l3.analyze(results, analysis_type='financial')
-
-if 'crisis_analysis' in crisis_analysis.network_analysis:
-    crisis_severity = crisis_analysis.network_analysis['crisis_analysis']['crisis_severity']
-    print(f"Crisis severity: {crisis_severity:.3f}")
-```
-
-### 4. **Custom Lambda³ + Real Data Pipelines**
-```python
-# Create custom analysis pipeline
-class CustomMarketPipeline:
-    def __init__(self):
-        self.acquisition = Lambda3DataAcquisition()
-        self.lambda3_config = l3.create_config('financial')
-    
-    def daily_market_analysis(self):
-        # Fetch today's data
-        data = self.acquisition.fetch_financial_markets_comprehensive()
-        
-        # Run Lambda³ analysis
-        results = l3.analyze(data, config=self.lambda3_config)
-        
-        # Generate alerts
-        quality = results.get_analysis_summary()['overall_quality']
-        if quality < 0.5:
-            print("⚠️ Market structure quality alert!")
-        
-        return results
-
-# Use custom pipeline
-pipeline = CustomMarketPipeline()
-daily_results = pipeline.daily_market_analysis()
-```
-
-## 🎯 Performance Optimizations
-
-- **JIT Acceleration**: All data processing uses Numba optimization
-- **Async Fetching**: Parallel data acquisition
-- **Smart Caching**: Automatic data caching
-- **Batch Processing**: Efficient multi-asset handling
-- **Memory Management**: Optimized for large datasets
-
-## 📋 Data Quality Features
-
-- **Automatic Missing Data Handling**
-- **Outlier Detection & Correction**
-- **Data Validation & Consistency Checks**
-- **Format Standardization**
-- **Lambda³-Optimized Preprocessing**
-
-## 🔍 Example: End-to-End Crisis Detection
-
-```python
-# Complete crisis detection workflow
-def detect_market_crisis():
-    # 1. Fetch comprehensive market data
-    acquisition = Lambda3DataAcquisition()
-    market_data = acquisition.fetch_financial_markets_comprehensive()
-    
-    # 2. Enhanced crisis detection configuration
-    crisis_config = l3.create_config('financial')
-    crisis_config.hierarchical.escalation_threshold = 0.3  # More sensitive
-    crisis_config.pairwise.asymmetry_detection_sensitivity = 0.05
-    crisis_config.analysis_modes['crisis_detection'] = True
-    
-    # 3. Run comprehensive Lambda³ analysis
-    results = l3.analyze(market_data, config=crisis_config, analysis_type='financial')
-    
-    # 4. Crisis detection analysis
-    crisis_indicators = []
-    
-    # Check hierarchical escalation
-    hierarchy_rankings = results.get_hierarchy_rankings()
-    for name, strength in hierarchy_rankings['escalation_strength']:
-        if strength > 0.6:
-            crisis_indicators.append(f"High escalation in {name}: {strength:.3f}")
-    
-    # Check network density (systemic risk)
-    if results.network_analysis:
-        density = results.network_analysis.get('density', 0)
-        if density > 0.7:
-            crisis_indicators.append(f"High systemic risk - network density: {density:.3f}")
-    
-    # Check interaction asymmetries
-    top_interactions = results.get_top_interactions(5)
-    for pair, strength in top_interactions:
-        if strength > 0.8:
-            crisis_indicators.append(f"Extreme coupling in {pair}: {strength:.3f}")
-    
-    # 5. Crisis alert system
-    if crisis_indicators:
-        print("🚨 MARKET CRISIS INDICATORS DETECTED:")
-        for indicator in crisis_indicators:
-            print(f"   ⚠️ {indicator}")
-        
-        # Additional crisis metrics
-        if 'crisis_analysis' in results.network_analysis:
-            crisis_data = results.network_analysis['crisis_analysis']
-            severity = crisis_data.get('crisis_severity', 0)
-            systemic_risk = crisis_data.get('systemic_risk_level', 0)
-            
-            print(f"\n📊 Crisis Metrics:")
-            print(f"   Severity: {severity:.3f}")
-            print(f"   Systemic Risk: {systemic_risk:.3f}")
-            
-            # Crisis level classification
-            if severity > 0.8:
-                crisis_level = "SEVERE"
-            elif severity > 0.6:
-                crisis_level = "MODERATE" 
-            elif severity > 0.4:
-                crisis_level = "MILD"
-            else:
-                crisis_level = "WATCH"
-            
-            print(f"   Crisis Level: {crisis_level}")
-    else:
-        print("✅ No crisis indicators detected - markets appear stable")
-    
-    return results, crisis_indicators
-
-# Run crisis detection
-crisis_results, alerts = detect_market_crisis()
-```
-
-## 📊 Advanced Analytics Examples
-
-### Multi-Timeframe Analysis
-```python
-# Analyze multiple timeframes simultaneously
-def multi_timeframe_analysis():
-    configs = {
-        'daily': DataAcquisitionConfig(start_date="2024-01-01", frequency="daily"),
-        'weekly': DataAcquisitionConfig(start_date="2023-01-01", frequency="weekly"), 
-        'monthly': DataAcquisitionConfig(start_date="2020-01-01", frequency="monthly")
-    }
-    
-    timeframe_results = {}
-    
-    for timeframe, config in configs.items():
-        acquisition = Lambda3DataAcquisition(config)
-        data = acquisition.fetch_financial_markets_comprehensive()
-        
-        # Timeframe-specific Lambda³ analysis
-        results = l3.analyze(data, analysis_type='comprehensive')
-        timeframe_results[timeframe] = results
-        
-        print(f"{timeframe.capitalize()} analysis quality: {results.get_analysis_summary()['overall_quality']:.3f}")
-    
-    return timeframe_results
-```
-
-### Sector Rotation Analysis
-```python
-# Detect sector rotation patterns
-def sector_rotation_analysis():
-    # Define sector ETFs
-    sectors = {
-        'Technology': 'XLK',
-        'Healthcare': 'XLV', 
-        'Financials': 'XLF',
-        'Energy': 'XLE',
-        'Consumer_Discretionary': 'XLY',
-        'Consumer_Staples': 'XLP',
-        'Industrials': 'XLI',
-        'Materials': 'XLB',
-        'Utilities': 'XLU',
-        'Real_Estate': 'XLRE'
-    }
-    
-    # Fetch sector data
-    acquisition = Lambda3DataAcquisition()
-    sector_data = acquisition._fetch_yahoo_batch(sectors)
-    
-    # Lambda³ network analysis for sector relationships
-    results = l3.analyze(sector_data, analysis_type='comprehensive')
-    
-    # Identify leading sectors (high centrality)
-    if results.network_analysis:
-        centrality_scores = results.network_analysis['centrality_scores']
-        series_names = results.network_analysis['series_names']
-        
-        sector_centrality = list(zip(series_names, centrality_scores))
-        sector_centrality.sort(key=lambda x: x[1], reverse=True)
-        
-        print("🔄 Sector Leadership Ranking:")
-        for i, (sector, centrality) in enumerate(sector_centrality[:5], 1):
-            print(f"   {i}. {sector}: {centrality:.3f}")
-    
-    return results
-```
-
-### Correlation Regime Detection
-```python
-# Detect correlation regime changes
-def correlation_regime_detection():
-    # Fetch equity indices data
-    indices = {
-        'US_SPX': '^GSPC',
-        'US_NDX': '^IXIC', 
-        'Europe_SX5E': '^STOXX50E',
-        'Japan_NKY': '^N225',
-        'China_SHCOMP': '000001.SS',
-        'Emerging_EEM': 'EEM'
-    }
-    
-    acquisition = Lambda3DataAcquisition()
-    indices_data = acquisition._fetch_yahoo_batch(indices)
-    
-    # Detect regime transitions using Lambda³
-    from lambda3.analysis.pairwise import PairwiseAnalyzer
-    
-    analyzer = PairwiseAnalyzer()
-    
-    # Analyze regime transitions for each pair
-    regime_results = {}
-    index_names = list(indices.keys())
-    
-    for i, name_a in enumerate(index_names):
-        for j, name_b in enumerate(index_names[i+1:], i+1):
-            
-            # Extract features for regime detection
-            features_a = l3.extract_features(indices_data[name_a].values, series_name=name_a)
-            features_b = l3.extract_features(indices_data[name_b].values, series_name=name_b)
-            
-            # Detect interaction regimes
-            regime_result = analyzer.detect_interaction_regimes(
-                features_a, features_b, regime_window=50
-            )
-            
-            pair_name = f"{name_a}_vs_{name_b}"
-            regime_results[pair_name] = regime_result
-            
-            # Print regime summary
-            n_regimes = regime_result['n_regimes']
-            print(f"{pair_name}: {n_regimes} correlation regimes detected")
-    
-    return regime_results
-```
-
-## 🛠️ Custom Data Source Integration
-
-### Adding New Data Sources
-```python
-# Example: Custom data source integration
-class CustomDataSource:
-    def __init__(self, api_key):
-        self.api_key = api_key
-    
-    def fetch_data(self, symbols, start_date, end_date):
+# Extend acquisition system
+class CustomDataAcquisition(Lambda3DataAcquisition):
+    def fetch_custom_api_data(self, endpoint, params):
         # Your custom data fetching logic
-        pass
-
-# Integrate with Lambda³ system
-def integrate_custom_source():
-    # Extend Lambda3DataAcquisition
-    class ExtendedAcquisition(Lambda3DataAcquisition):
-        def __init__(self, config, custom_source):
-            super().__init__(config)
-            self.custom_source = custom_source
+        raw_data = requests.get(endpoint, params=params).json()
         
-        def fetch_custom_provider_data(self, symbols):
-            raw_data = self.custom_source.fetch_data(
-                symbols, self.config.start_date, self.config.end_date
-            )
-            
-            # Process and standardize
-            processed_data = self._preprocess_custom_data(raw_data)
-            return processed_data
-    
-    # Use extended acquisition
-    custom_source = CustomDataSource('your_api_key')
-    acquisition = ExtendedAcquisition(DataAcquisitionConfig(), custom_source)
-    
-    return acquisition
+        # Process with Lambda³ preprocessing
+        processed_data = self._preprocess_custom_data(raw_data)
+        return processed_data
+
+# Use extended system
+custom_acq = CustomDataAcquisition()
+custom_data = custom_acq.fetch_custom_api_data("https://api.example.com/data", {})
 ```
 
-## 📱 Real-time Dashboard Integration
+---
 
-### Streamlit Dashboard Example
+## 📊 Data Source Requirements
+
+### Dependencies
 ```python
-import streamlit as st
-import plotly.graph_objects as go
+# Basic real data capabilities
+pip install yfinance
 
-def create_lambda3_dashboard():
-    st.title("🔬 Lambda³ Real-time Market Analysis")
-    
-    # Sidebar configuration
-    st.sidebar.header("Analysis Configuration")
-    
-    analysis_type = st.sidebar.selectbox(
-        "Analysis Type", 
-        ['financial', 'rapid', 'comprehensive', 'research']
-    )
-    
-    asset_categories = st.sidebar.multiselect(
-        "Asset Categories",
-        ['US_Equities', 'International_Equities', 'Currencies', 'Commodities'],
-        default=['US_Equities', 'Currencies']
-    )
-    
-    # Data acquisition
-    if st.sidebar.button("Run Analysis"):
-        with st.spinner("Fetching market data..."):
-            # Fetch data
-            market_data = quick_financial_data_fetch(asset_types=asset_categories)
-            
-            # Lambda³ analysis
-            results = l3.analyze(market_data, analysis_type=analysis_type)
-            
-            # Display results
-            summary = results.get_analysis_summary()
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Series Analyzed", summary['series_count'])
-            
-            with col2:
-                st.metric("Overall Quality", f"{summary['overall_quality']:.3f}")
-            
-            with col3:
-                st.metric("Execution Time", f"{summary['execution_time']:.2f}s")
-            
-            # Network visualization
-            if results.network_analysis:
-                st.subheader("🌐 Market Network Analysis")
-                
-                # Create network plot
-                fig = create_network_plot(results.network_analysis)
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Top interactions
-            if results.pairwise_results:
-                st.subheader("🔗 Strongest Market Interactions")
-                
-                top_interactions = results.get_top_interactions(10)
-                
-                # Create interaction chart
-                pairs = [pair for pair, _ in top_interactions]
-                strengths = [strength for _, strength in top_interactions]
-                
-                fig = go.Figure(data=go.Bar(x=strengths, y=pairs, orientation='h'))
-                fig.update_layout(
-                    title="Top Pairwise Interactions",
-                    xaxis_title="Interaction Strength",
-                    height=400
-                )
-                st.plotly_chart(fig, use_container_width=True)
+# FRED economic data
+pip install pandas-datareader
 
-def create_network_plot(network_data):
-    # Create interactive network visualization
-    # Implementation details...
-    pass
+# Enhanced data sources
+pip install quandl alpha-vantage
 
-if __name__ == "__main__":
-    create_lambda3_dashboard()
+# All data capabilities
+pip install lambda3[complete]
 ```
 
-## 🔮 Future Data Integration Roadmap
+### API Keys (Optional)
+```python
+import os
 
-### Planned Enhancements
-- **🤖 AI-Powered Data Sources**: Alternative data integration
-- **🌐 Global Economic Calendars**: Event-driven analysis
-- **📊 High-Frequency Data**: Microsecond resolution
-- **🔗 Blockchain Data**: DeFi and on-chain metrics
-- **🛰️ Satellite Data**: Alternative economic indicators
-- **📱 Social Sentiment**: News and social media integration
-- **🏦 Central Bank Communications**: Policy analysis
+# Enhanced Quandl access
+os.environ['QUANDL_API_KEY'] = 'your_quandl_key'
 
-### API Expansion
-- **Bloomberg Terminal**: Professional data feeds
-- **Refinitiv Eikon**: Institutional data
-- **FactSet**: Research data integration
-- **S&P Capital IQ**: Fundamental data
-- **IEX Cloud**: Real-time market data
+# Alpha Vantage high-frequency data
+os.environ['ALPHA_VANTAGE_KEY'] = 'your_alpha_vantage_key'
+```
 
-## ⚡ Performance Benchmarks
+---
 
-### Data Acquisition Speed
-| **Data Source** | **Assets** | **Time Period** | **Fetch Time** | **Lambda³ Analysis** |
-|-----------------|------------|-----------------|----------------|---------------------|
-| Yahoo Finance   | 50 stocks  | 2 years        | 15s           | 8s (JIT enabled)   |
-| FRED           | 20 indicators | 5 years      | 25s           | 12s                 |
-| Cryptocurrency | 10 coins   | 1 year         | 8s            | 5s                  |
-| Custom CSV     | 100 series | Any           | 2s            | 15s                 |
+## 🔍 Troubleshooting
 
-### Memory Efficiency
-- **Raw Data**: ~50MB for 50 assets × 2 years daily
-- **Processed Data**: ~75MB with returns/features
-- **Lambda³ Results**: ~25MB comprehensive analysis
-- **Total Memory**: <200MB for full workflow
+### Common Issues
 
-## 🔧 Troubleshooting
-
-### Common Issues & Solutions
+**Missing Dependencies**
+```bash
+# Install missing packages
+pip install yfinance pandas-datareader
+```
 
 **API Rate Limits**
 ```python
-# Solution: Configure rate limiting
 config = DataAcquisitionConfig()
-config.rate_limit_per_minute = 30  # Reduce requests
+config.rate_limit_per_minute = 30  # Reduce request frequency
 ```
 
-**Missing Data**
+**Data Quality Issues**
 ```python
-# Solution: Robust handling
-config.fill_missing_method = "interpolate"
-config.min_data_points = 30  # Lower threshold
+config.outlier_detection = True      # Enable outlier removal
+config.min_data_points = 30          # Lower minimum threshold
+config.fill_missing_method = "interpolate"  # Better gap filling
 ```
 
 **Memory Issues**
 ```python
-# Solution: Process in chunks
-def process_large_dataset(large_data):
-    chunk_size = 20  # Assets per chunk
-    results = []
-    
-    for i in range(0, len(large_data), chunk_size):
-        chunk = dict(list(large_data.items())[i:i+chunk_size])
-        chunk_result = l3.analyze(chunk, analysis_type='rapid')
-        results.append(chunk_result)
-    
-    return results
+# Process in smaller chunks
+def process_large_dataset(data_dict):
+    chunk_size = 20
+    for i in range(0, len(data_dict), chunk_size):
+        chunk = dict(list(data_dict.items())[i:i+chunk_size])
+        yield l3.analyze(chunk, analysis_type='rapid')
 ```
-
-**Network Connectivity**
-```python
-# Solution: Retry mechanism
-config = DataAcquisitionConfig()
-config.retry_attempts = 5
-config.timeout_seconds = 60
-```
-
-## 📞 Support & Community
-
-- **📧 Issues**: [GitHub Issues](https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues)
-- **💬 Discussions**: [GitHub Discussions](https://github.com/miosync-masa/Lambda_FinanceAnalyzer/discussions)
-- **📚 Documentation**: Full API reference available
-- **🎓 Examples**: Complete example repository
 
 ---
 
-## 🎯 Summary: Lambda³ + Real Data = Complete Financial Analysis
+## 📞 Support
 
-The integration of real data acquisition with Lambda³ structural tensor analysis creates a powerful end-to-end financial analysis platform:
+- **🐛 Data Issues**: [Report on GitHub Issues](https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues)
+- **💬 Questions**: [GitHub Discussions](https://github.com/miosync-masa/Lambda_FinanceAnalyzer/discussions)
+- **📚 Examples**: See `examples/` directory for complete workflows
 
-1. **🔄 Automatic Data Acquisition**: From 6+ data sources
-2. **🧠 Advanced Preprocessing**: Lambda³-optimized cleaning
-3. **⚡ JIT-Accelerated Analysis**: 10-100x performance boost
-4. **🔬 Structural Tensor Analysis**: Unique mathematical insights
-5. **🌐 Network Dynamics**: System-wide relationship mapping
-6. **🚨 Crisis Detection**: Early warning capabilities
-7. **📊 Rich Visualizations**: Publication-ready charts
-8. **🔧 Extensible Architecture**: Easy custom integration
+---
 
-**Lambda³ Theory + Real Market Data = Revolutionary Financial Insights** 🚀
+## 🎯 Summary
+
+The Lambda³ data acquisition system provides:
+
+✅ **6+ Data Sources**: Yahoo Finance, FRED, Quandl, Alpha Vantage, Custom Files, Real-time  
+✅ **Automatic Preprocessing**: Lambda³-optimized data cleaning and validation  
+✅ **JIT-Accelerated**: High-performance numerical processing  
+✅ **Sample Data**: Built-in datasets for testing and learning  
+✅ **Real-time Capability**: Live market data streaming  
+✅ **Extensible Design**: Easy custom data source integration  
+
+**Real Market Data + Lambda³ Theory = Revolutionary Financial Insights** 🚀
