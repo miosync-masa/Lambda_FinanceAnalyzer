@@ -1,10 +1,10 @@
 # ==========================================================
-# pyproject.toml - Lambda³ Finance Analyzer Modern Configuration
+# pyproject.toml - Lambda³ Finance Analyzer Modern Configuration (修正版)
 # 
 # Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
-# 修正ポイント: 重複セクション除去、パッケージ発見の最適化
+# 修正ポイント: 重複セクション完全除去、パッケージ発見の最適化
 # ==========================================================
 
 [build-system]
@@ -188,7 +188,7 @@ lambda3-financial = "lambda3.cli:financial_command"
 lambda3-benchmark = "lambda3.cli:benchmark_command"
 
 # ==========================================================
-# SETUPTOOLS CONFIGURATION - パッケージ発見の最適化
+# SETUPTOOLS CONFIGURATION - パッケージ発見の最適化（単一セクション）
 # ==========================================================
 
 [tool.setuptools]
@@ -197,7 +197,7 @@ packages = ["lambda3"]
 include-package-data = true
 zip-safe = false
 
-# 明示的パッケージ指定（単一セクション）
+# 明示的パッケージ指定（重複除去 - この1箇所のみ）
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lambda3*"]
