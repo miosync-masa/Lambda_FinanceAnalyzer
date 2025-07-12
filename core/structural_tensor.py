@@ -53,8 +53,8 @@ LONG_DESCRIPTION = load_readme()
 VERSION = "1.0.0-alpha"
 
 # 作者情報
-AUTHOR = "Mamichi Iizumi"
-AUTHOR_EMAIL = "m.iizumi@miosync.com"
+AUTHOR = "Masamichi Iizumi"
+AUTHOR_EMAIL = "m.iizumi@miosync.email"
 
 # パッケージメタデータ
 PACKAGE_NAME = "lambda3"
