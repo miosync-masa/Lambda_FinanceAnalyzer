@@ -493,14 +493,39 @@ class StructuralTensorExtractor:
         try:
             if feature_level == 'comprehensive':
                 # 包括特徴量（階層的解析含む）
+                # 設定値の安全な取得
+                window = getattr(self.config, 'window', 10)
+                if hasattr(self.config, 'base'):
+                    window = getattr(self.config.base, 'window', window)
+                
+                local_window = getattr(self.config, 'local_window', 5)
+                if hasattr(self.config, 'base'):
+                    local_window = getattr(self.config.base, 'local_window', local_window)
+                
+                global_window = getattr(self.config, 'global_window', 30)
+                if hasattr(self.config, 'base'):
+                    global_window = getattr(self.config.base, 'global_window', global_window)
+                
+                delta_percentile = getattr(self.config, 'delta_percentile', 95.0)
+                if hasattr(self.config, 'base'):
+                    delta_percentile = getattr(self.config.base, 'delta_percentile', delta_percentile)
+                
+                local_percentile = getattr(self.config, 'local_threshold_percentile', 85.0)
+                if hasattr(self.config, 'base'):
+                    local_percentile = getattr(self.config.base, 'local_threshold_percentile', local_percentile)
+                
+                global_percentile = getattr(self.config, 'global_threshold_percentile', 92.5)
+                if hasattr(self.config, 'base'):
+                    global_percentile = getattr(self.config.base, 'global_threshold_percentile', global_percentile)
+                
                 features_tuple = extract_lambda3_features_jit(
                     data,
-                    window=self.config.window,
-                    local_window=getattr(self.config, 'local_window', 5),
-                    global_window=getattr(self.config, 'global_window', 30),
-                    delta_percentile=getattr(self.config, 'delta_percentile', 95.0),
-                    local_percentile=getattr(self.config, 'local_threshold_percentile', 85.0),
-                    global_percentile=getattr(self.config, 'global_threshold_percentile', 92.5)
+                    window=window,
+                    local_window=local_window,
+                    global_window=global_window,
+                    delta_percentile=delta_percentile,
+                    local_percentile=local_percentile,
+                    global_percentile=global_percentile
                 )
                 
                 # 結果の展開と安全性確保
@@ -523,9 +548,17 @@ class StructuralTensorExtractor:
                 
             else:
                 # 標準特徴量
-                diff, threshold = calculate_diff_and_threshold_fixed(data, self.config.threshold_percentile)
+                threshold_percentile = getattr(self.config, 'threshold_percentile', 95.0)
+                if hasattr(self.config, 'base'):
+                    threshold_percentile = getattr(self.config.base, 'threshold_percentile', threshold_percentile)
+                
+                window = getattr(self.config, 'window', 10)
+                if hasattr(self.config, 'base'):
+                    window = getattr(self.config.base, 'window', window)
+                
+                diff, threshold = calculate_diff_and_threshold_fixed(data, threshold_percentile)
                 delta_pos, delta_neg = detect_structural_jumps_fixed(diff, threshold)
-                rho_t = calculate_tension_scalar_fixed(delta_pos, delta_neg, data, self.config.window)
+                rho_t = calculate_tension_scalar_fixed(delta_pos, delta_neg, data, window)
                 
                 features = StructuralTensorFeatures(
                     data=data,
@@ -589,7 +622,9 @@ class StructuralTensorExtractor:
         """安全な張力スカラー計算"""
         n = len(data)
         rho_t = np.zeros(n, dtype=np.float64)
-        window = self.config.window
+        window = getattr(self.config, 'window', 10)
+        if hasattr(self.config, 'base') and hasattr(self.config.base, 'window'):
+            window = self.config.base.window
         
         for i in range(n):
             # 窓範囲計算
@@ -626,7 +661,12 @@ class StructuralTensorExtractor:
             
             # 窓サイズ設定
             local_window = getattr(self.config, 'local_window', 5)
+            if hasattr(self.config, 'base'):
+                local_window = getattr(self.config.base, 'local_window', local_window)
+            
             global_window = getattr(self.config, 'global_window', 30)
+            if hasattr(self.config, 'base'):
+                global_window = getattr(self.config.base, 'global_window', global_window)
             
             # 差分計算
             diff = safe_diff(data)
