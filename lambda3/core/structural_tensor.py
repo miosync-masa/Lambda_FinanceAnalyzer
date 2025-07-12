@@ -45,18 +45,17 @@ except ImportError:
 # ==========================================================
 # STRUCTURAL TENSOR FEATURES - 構造テンソル特徴量
 # ==========================================================
-
 @dataclass
 class StructuralTensorFeatures:
     """
-    Lambda³構造テンソル特徴量（完全版）
+    Lambda³構造テンソル特徴量（型整合性強化版）
     
     ∆ΛC pulsations、ρT、階層的構造変化を包含する
-    完全な特徴量表現。
+    完全な特徴量表現。全配列のfloat64統一を保証。
     """
     
-    # 基本データ
-    data: np.ndarray
+    # 基本データ（明示的float64）
+    data: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     series_name: str = "Series"
     
     # 基本構造変化（∆ΛC）- float64保証
@@ -66,73 +65,144 @@ class StructuralTensorFeatures:
     # 張力スカラー（ρT）
     rho_T: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     
-    # 時間トレンド
-    time_trend: Optional[np.ndarray] = None
+    # 時間トレンド（float64統一）
+    time_trend: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     
-    # 階層的構造変化（float64保証）
-    local_pos: Optional[np.ndarray] = None
-    local_neg: Optional[np.ndarray] = None
-    global_pos: Optional[np.ndarray] = None
-    global_neg: Optional[np.ndarray] = None
+    # 階層的構造変化（全てfloat64初期化）
+    local_pos: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    local_neg: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    global_pos: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    global_neg: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     
-    # 階層的純粋成分
-    pure_local_pos: Optional[np.ndarray] = None
-    pure_local_neg: Optional[np.ndarray] = None
-    pure_global_pos: Optional[np.ndarray] = None
-    pure_global_neg: Optional[np.ndarray] = None
-    mixed_pos: Optional[np.ndarray] = None
-    mixed_neg: Optional[np.ndarray] = None
+    # 階層的純粋成分（全てfloat64初期化）
+    pure_local_pos: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    pure_local_neg: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    pure_global_pos: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    pure_global_neg: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    mixed_pos: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
+    mixed_neg: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     
     # 追加特徴量
-    local_jump_detect: Optional[np.ndarray] = None
+    local_jump_detect: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float64))
     
     # メタデータ
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """初期化後の型変換とサイズ調整"""
-        # float64への統一
-        self.data = np.asarray(self.data, dtype=np.float64)
+        """初期化後の型変換とサイズ調整（強化版）"""
+        # 基本データの型変換（入力データも強制的にfloat64へ）
+        if isinstance(self.data, np.ndarray):
+            self.data = self.data.astype(np.float64, copy=False)
+        else:
+            self.data = np.asarray(self.data, dtype=np.float64)
         
-        # 基本特徴量の型保証
-        if len(self.delta_LambdaC_pos) > 0:
-            self.delta_LambdaC_pos = self.delta_LambdaC_pos.astype(np.float64)
-        if len(self.delta_LambdaC_neg) > 0:
-            self.delta_LambdaC_neg = self.delta_LambdaC_neg.astype(np.float64)
-        if len(self.rho_T) > 0:
-            self.rho_T = self.rho_T.astype(np.float64)
+        # 全配列フィールドの型統一処理
+        array_fields = [
+            'delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend',
+            'local_pos', 'local_neg', 'global_pos', 'global_neg',
+            'pure_local_pos', 'pure_local_neg', 'pure_global_pos', 'pure_global_neg',
+            'mixed_pos', 'mixed_neg', 'local_jump_detect'
+        ]
+        
+        for field_name in array_fields:
+            value = getattr(self, field_name)
             
-        # 時間トレンドの自動生成
-        if self.time_trend is None:
+            # 配列の型変換と検証
+            if value is not None:
+                if isinstance(value, np.ndarray):
+                    # すでにndarrayの場合、float64に変換
+                    if value.dtype != np.float64:
+                        setattr(self, field_name, value.astype(np.float64, copy=False))
+                elif isinstance(value, (list, tuple)):
+                    # リストやタプルの場合、float64配列に変換
+                    setattr(self, field_name, np.array(value, dtype=np.float64))
+                elif len(value) == 0:
+                    # 空配列の場合も型を保証
+                    setattr(self, field_name, np.array([], dtype=np.float64))
+        
+        # 時間トレンドの自動生成（必ずfloat64）
+        if len(self.time_trend) == 0:
             self.time_trend = np.arange(len(self.data), dtype=np.float64)
+        
+        # データ長に基づくサイズ調整（オプション）
+        self._adjust_array_sizes()
+    
+    def _adjust_array_sizes(self):
+        """配列サイズの自動調整"""
+        n = len(self.data)
+        
+        # 基本特徴量のサイズ調整
+        for field_name in ['delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T']:
+            arr = getattr(self, field_name)
+            if len(arr) == 0:
+                # 空の場合は適切なサイズで初期化
+                setattr(self, field_name, np.zeros(n, dtype=np.float64))
+            elif len(arr) != n:
+                # サイズ不一致の場合は警告（自動調整は危険なので行わない）
+                self.metadata.setdefault('warnings', []).append(
+                    f"{field_name} size mismatch: {len(arr)} != {n}"
+                )
+    
+    def ensure_type_consistency(self) -> 'StructuralTensorFeatures':
+        """型整合性を強制的に確保（チェインメソッド用）"""
+        self.__post_init__()
+        return self
     
     def get_structural_summary(self) -> Dict[str, Any]:
-        """構造テンソル特性の要約統計"""
+        """構造テンソル特性の要約統計（型安全版）"""
         summary = {
             'series_name': self.series_name,
             'data_length': len(self.data),
-            'total_pos_jumps': np.sum(self.delta_LambdaC_pos),
-            'total_neg_jumps': np.sum(self.delta_LambdaC_neg),
-            'mean_tension': np.mean(self.rho_T) if len(self.rho_T) > 0 else 0.0,
-            'max_tension': np.max(self.rho_T) if len(self.rho_T) > 0 else 0.0,
+            'data_dtype': str(self.data.dtype),
+            'total_pos_jumps': float(np.sum(self.delta_LambdaC_pos)),
+            'total_neg_jumps': float(np.sum(self.delta_LambdaC_neg)),
+            'mean_tension': float(np.mean(self.rho_T)) if len(self.rho_T) > 0 else 0.0,
+            'max_tension': float(np.max(self.rho_T)) if len(self.rho_T) > 0 else 0.0,
         }
         
-        # 階層的特徴量の統計
-        if self.local_pos is not None:
-            summary['local_pos_events'] = np.sum(self.local_pos)
-            summary['local_neg_events'] = np.sum(self.local_neg)
-        if self.global_pos is not None:
-            summary['global_pos_events'] = np.sum(self.global_pos)
-            summary['global_neg_events'] = np.sum(self.global_neg)
+        # 階層的特徴量の統計（型安全）
+        if len(self.local_pos) > 0:
+            summary['local_pos_events'] = float(np.sum(self.local_pos))
+            summary['local_neg_events'] = float(np.sum(self.local_neg))
+        if len(self.global_pos) > 0:
+            summary['global_pos_events'] = float(np.sum(self.global_pos))
+            summary['global_neg_events'] = float(np.sum(self.global_neg))
+        
+        # 階層的純粋成分の統計
+        if len(self.pure_local_pos) > 0:
+            summary['pure_local_events'] = float(
+                np.sum(self.pure_local_pos) + np.sum(self.pure_local_neg)
+            )
+            summary['pure_global_events'] = float(
+                np.sum(self.pure_global_pos) + np.sum(self.pure_global_neg)
+            )
+            summary['mixed_events'] = float(
+                np.sum(self.mixed_pos) + np.sum(self.mixed_neg)
+            )
             
         return summary
     
     def validate_consistency(self) -> Tuple[bool, List[str]]:
-        """特徴量の整合性検証"""
+        """特徴量の整合性検証（強化版）"""
         errors = []
+        warnings = []
         n = len(self.data)
         
-        # サイズ整合性チェック
+        # 型チェック（全配列）
+        array_fields = {
+            'data': self.data,
+            'delta_LambdaC_pos': self.delta_LambdaC_pos,
+            'delta_LambdaC_neg': self.delta_LambdaC_neg,
+            'rho_T': self.rho_T,
+            'time_trend': self.time_trend
+        }
+        
+        for name, arr in array_fields.items():
+            if isinstance(arr, np.ndarray) and len(arr) > 0:
+                if arr.dtype != np.float64:
+                    errors.append(f"{name} dtype is {arr.dtype}, expected float64")
+        
+        # サイズ整合性チェック（必須フィールド）
         for name, arr in [
             ('delta_LambdaC_pos', self.delta_LambdaC_pos),
             ('delta_LambdaC_neg', self.delta_LambdaC_neg),
@@ -141,16 +211,82 @@ class StructuralTensorFeatures:
             if len(arr) > 0 and len(arr) != n:
                 errors.append(f"{name} size mismatch: {len(arr)} != {n}")
         
-        # 型チェック
-        if self.data.dtype != np.float64:
-            errors.append(f"data dtype is {self.data.dtype}, expected float64")
-            
-        # 値範囲チェック
+        # 値範囲チェック（∆ΛCは0または1）
         if len(self.delta_LambdaC_pos) > 0:
-            if np.any((self.delta_LambdaC_pos < 0) | (self.delta_LambdaC_pos > 1)):
-                errors.append("delta_LambdaC_pos values must be in [0, 1]")
+            unique_values = np.unique(self.delta_LambdaC_pos)
+            if not np.all(np.isin(unique_values, [0.0, 1.0])):
+                warnings.append("delta_LambdaC_pos contains non-binary values")
                 
+        if len(self.delta_LambdaC_neg) > 0:
+            unique_values = np.unique(self.delta_LambdaC_neg)
+            if not np.all(np.isin(unique_values, [0.0, 1.0])):
+                warnings.append("delta_LambdaC_neg contains non-binary values")
+        
+        # NaN/Inf チェック
+        for name, arr in array_fields.items():
+            if isinstance(arr, np.ndarray) and len(arr) > 0:
+                if np.isnan(arr).any():
+                    errors.append(f"{name} contains NaN values")
+                if np.isinf(arr).any():
+                    errors.append(f"{name} contains Inf values")
+        
+        # 階層的特徴量の整合性チェック（存在する場合）
+        if len(self.local_pos) > 0 and len(self.global_pos) > 0:
+            # 純粋成分と混合成分の合計が元の成分と一致するか
+            if len(self.pure_local_pos) > 0 and len(self.mixed_pos) > 0:
+                local_total = self.pure_local_pos + self.mixed_pos
+                expected_local = self.local_pos * (1 - self.global_pos)
+                if not np.allclose(local_total, expected_local, atol=1e-10):
+                    warnings.append("Hierarchical component consistency issue")
+        
+        # 警告をメタデータに保存
+        if warnings:
+            self.metadata['validation_warnings'] = warnings
+        
         return len(errors) == 0, errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式への変換（型保証付き）"""
+        result = {
+            'series_name': self.series_name,
+            'data': self.data.tolist(),
+            'metadata': self.metadata
+        }
+        
+        # 全配列フィールドを含める
+        array_fields = [
+            'delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend',
+            'local_pos', 'local_neg', 'global_pos', 'global_neg',
+            'pure_local_pos', 'pure_local_neg', 'pure_global_pos', 'pure_global_neg',
+            'mixed_pos', 'mixed_neg', 'local_jump_detect'
+        ]
+        
+        for field_name in array_fields:
+            arr = getattr(self, field_name)
+            if isinstance(arr, np.ndarray) and len(arr) > 0:
+                result[field_name] = arr.tolist()
+        
+        return result
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StructuralTensorFeatures':
+        """辞書からの復元（型保証付き）"""
+        # 配列フィールドをnumpy配列に変換
+        array_fields = [
+            'data', 'delta_LambdaC_pos', 'delta_LambdaC_neg', 'rho_T', 'time_trend',
+            'local_pos', 'local_neg', 'global_pos', 'global_neg',
+            'pure_local_pos', 'pure_local_neg', 'pure_global_pos', 'pure_global_neg',
+            'mixed_pos', 'mixed_neg', 'local_jump_detect'
+        ]
+        
+        kwargs = {}
+        for key, value in data.items():
+            if key in array_fields and isinstance(value, list):
+                kwargs[key] = np.array(value, dtype=np.float64)
+            else:
+                kwargs[key] = value
+        
+        return cls(**kwargs)
 
 # ==========================================================
 # FEATURE EXTRACTION - 特徴量抽出
