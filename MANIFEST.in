@@ -1,0 +1,14 @@
+# ================================================================
+# 4. MANIFEST.in
+# ================================================================
+
+"""
+# MANIFEST.in
+include README.md
+include LICENSE
+include requirements.txt
+recursive-include lambda3/data *.json *.csv
+recursive-include lambda3/configs *.yaml *.toml
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+"""
