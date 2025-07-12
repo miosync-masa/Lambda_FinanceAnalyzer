@@ -4,7 +4,7 @@
 # Author: Masamichi Iizumi (Miosync, Inc.)  
 # License: MIT
 #
-# 修正ポイント: setup.pyとの競合解消、パッケージ発見の最適化
+# 修正ポイント: 重複セクション除去、パッケージ発見の最適化
 # ==========================================================
 
 [build-system]
@@ -197,63 +197,79 @@ packages = ["lambda3"]
 include-package-data = true
 zip-safe = false
 
-# 明示的パッケージ指定（フォールバック）
+# 明示的パッケージ指定（単一セクション）
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lambda3*"]
-exclude = ["tests*", "docs*", "examples*"]
+exclude = ["tests*", "docs*", "examples*", "scripts*"]
 
-[tool.setuptools.dynamic]
-version = {attr = "lambda3.version.__version__"}
-
+# パッケージデータ包含
 [tool.setuptools.package-data]
 lambda3 = [
-    "data/*.json",
-    "data/*.csv", 
-    "configs/*.yaml",
-    "configs/*.toml",
-    "templates/*.html",
-    "static/css/*.css",
-    "static/js/*.js",
+    "*.txt",
+    "*.md", 
+    "*.yml",
+    "*.yaml",
+    "*.json",
+    "data/**/*",
+    "config/**/*",
+    "tests/**/*",
 ]
 
 # ==========================================================
-# TOOL CONFIGURATIONS - 開発ツール設定
+# DEVELOPMENT TOOLS CONFIGURATION
 # ==========================================================
+
+# Setuptools SCM バージョン管理
+[tool.setuptools_scm]
+write_to = "lambda3/_version.py"
+version_scheme = "post-release"
+local_scheme = "no-local-version"
 
 # Black コードフォーマッター
 [tool.black]
 line-length = 100
 target-version = ["py38", "py39", "py310", "py311", "py312"]
-include = '\.pyi?$'
+include = "\\.pyi?$"
 extend-exclude = '''
 /(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
+    # 標準除外
+    \\.eggs
+  | \\.git
+  | \\.hg
+  | \\.mypy_cache
+  | \\.tox
+  | \\.venv
+  | _build
+  | buck-out
   | build
   | dist
+  | migrations
+  
+  # Lambda³専用除外
+  | lambda3/_version\\.py
+  | docs/
+  | examples/legacy/
 )/
 '''
 
-# isort インポート並び替え
+# isort インポート整理
 [tool.isort]
 profile = "black"
-line_length = 100
 multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
+line_length = 100
 known_first_party = ["lambda3"]
-known_third_party = ["numpy", "pandas", "matplotlib", "seaborn", "numba", "pymc", "arviz"]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+known_third_party = [
+    "numpy", "scipy", "pandas", "numba", "matplotlib", "seaborn",
+    "pymc", "arviz", "sklearn", "tensorflow", "torch", "yfinance"
+]
+skip_glob = [
+    "lambda3/_version.py",
+    "docs/*",
+    "examples/legacy/*"
+]
 
-# MyPy 型チェック
+# MyPy 静的型検査
 [tool.mypy]
 python_version = "3.8"
 warn_return_any = true
@@ -268,13 +284,13 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
-show_error_codes = true
 
+# Lambda³専用MyPy設定
 [[tool.mypy.overrides]]
 module = [
     "numba.*",
-    "matplotlib.*",
-    "seaborn.*",
+    "pymc.*", 
+    "arviz.*",
     "yfinance.*",
     "pandas_datareader.*",
     "quandl.*",
@@ -345,161 +361,8 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-show_missing = true
-precision = 2
-
-[tool.coverage.html]
-directory = "htmlcov"
-
-# Flake8 リント設定
-[tool.flake8]
-max-line-length = 100
-extend-ignore = [
-    "E203",  # whitespace before ':'
-    "E501",  # line too long (handled by black)
-    "W503",  # line break before binary operator
-]
-exclude = [
-    ".git",
-    "__pycache__",
-    "docs/source/conf.py",
-    "old",
-    "build",
-    "dist",
-    ".eggs",
-    "*.egg-info",
-    ".tox",
-    ".venv",
-    "venv",
-]
-per-file-ignores = [
-    "__init__.py:F401",  # imported but unused
-    "test_*.py:S101",    # assert used
-]
 
 # Bandit セキュリティ検査
 [tool.bandit]
-exclude_dirs = ["tests", "docs"]
-skips = ["B101", "B601"]  # assert_used, paramiko_calls
-
-# ==========================================================
-# BUILD AND DISTRIBUTION - ビルド・配布設定
-# ==========================================================
-
-[tool.setuptools_scm]
-write_to = "lambda3/_version.py"
-version_scheme = "release-branch-semver"
-local_scheme = "dirty-tag"
-
-[tool.wheel]
-universal = false
-
-[tool.bdist_wheel]
-universal = false
-
-# ==========================================================
-# DOCUMENTATION - ドキュメント設定
-# ==========================================================
-
-[tool.sphinx]
-source-dir = "docs/source"
-build-dir = "docs/build"
-
-[tool.sphinx.extensions]
-extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary", 
-    "sphinx.ext.doctest",
-    "sphinx.ext.intersphinx",
-    "sphinx.ext.todo",
-    "sphinx.ext.coverage",
-    "sphinx.ext.mathjax",
-    "sphinx.ext.ifconfig",
-    "sphinx.ext.viewcode",
-    "sphinx.ext.githubpages",
-    "sphinx.ext.napoleon",
-    "myst_parser",
-]
-
-# ==========================================================
-# PERFORMANCE PROFILING - 性能プロファイリング設定  
-# ==========================================================
-
-[tool.py-spy]
-duration = 30
-rate = 100
-format = "flamegraph"
-output = "profiling/lambda3_profile.svg"
-
-[tool.memory-profiler]
-precision = 3
-backend = "psutil"
-
-# ==========================================================
-# DEVELOPMENT WORKFLOW - 開発ワークフロー設定
-# ==========================================================
-
-[tool.tox]
-legacy_tox_ini = """
-[tox]
-envlist = py38,py39,py310,py311,py312,flake8,mypy,docs
-isolated_build = true
-
-[testenv]
-deps = 
-    pytest>=7.0.0
-    pytest-cov>=4.0.0
-    pytest-benchmark>=4.0.0
-commands = pytest {posargs}
-
-[testenv:flake8]
-deps = flake8>=4.0.0
-commands = flake8 lambda3 tests
-
-[testenv:mypy]
-deps = mypy>=0.950
-commands = mypy lambda3
-
-[testenv:docs]
-deps = 
-    sphinx>=4.5.0
-    sphinx-rtd-theme>=1.0.0
-commands = sphinx-build -W -b html docs/source docs/build
-"""
-
-# ==========================================================
-# INSTALLATION INSTRUCTIONS - インストール手順
-# ==========================================================
-
-# インストール方法:
-#
-# 1. 基本インストール:
-#    pip install .
-#
-# 2. 開発インストール:
-#    pip install -e .
-#
-# 3. 完全インストール:
-#    pip install .[complete]
-#
-# 4. 金融分析用:
-#    pip install .[financial,visualization]
-#
-# 5. ベイズ分析用:
-#    pip install .[bayesian,financial]
-#
-# 6. 開発環境:
-#    pip install -e .[dev]
-
-# トラブルシューティング:
-#
-# 1. パッケージが見つからない場合:
-#    pip uninstall lambda3
-#    pip install -e .
-#
-# 2. JIT最適化が無効な場合:
-#    pip install numba>=0.56.0
-#
-# 3. 依存関係エラーの場合:
-#    pip install --upgrade pip
-#    pip install -r requirements.txt
+exclude_dirs = ["tests", "docs", "examples"]
+skips = ["B101", "B601"]  # assert文とshell=Trueの使用を許可
