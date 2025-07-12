@@ -10,13 +10,10 @@ This directory contains Lambda³'s comprehensive real data acquisition and manag
 lambda3/data/
 ├── 📄 __init__.py              # Sample data generators & loaders
 ├── 🌐 acquisition.py           # Real data acquisition system  
-├── 📊 README.md               # This documentation
-└── 🗂️ samples/               # Sample datasets (when generated)
-    ├── structural_changes/
-    ├── financial_portfolio/
-    ├── crisis_scenarios/
-    └── synthetic_markets/
+└── 📊 README.md               # This documentation
 ```
+
+**Note**: Sample datasets are generated in-memory by the `Lambda3SampleDataGenerator` class and can be optionally saved to disk using the `DataAcquisitionConfig.output_directory` setting.
 
 ---
 
@@ -159,60 +156,60 @@ config = setup_data_acquisition_config(
 
 ## 📋 Sample Data System
 
-### Built-in Sample Datasets
+### Built-in Sample Data Generators
 
-Lambda³ includes comprehensive sample datasets for testing and learning:
+Lambda³ includes in-memory sample data generators for testing and learning:
 
 ```python
 import lambda3 as l3
 
-# View available datasets
+# View available dataset types
 print(l3.AVAILABLE_DATASETS)
 # Output: ['structural_changes', 'financial_portfolio', 'crisis_scenarios', 'synthetic_markets']
 
-# Load specific dataset
+# Load specific dataset (generated in-memory)
 structural_data = l3.load_sample_data("structural_changes")
 print(structural_data['metadata']['description'])
 
 # Access individual samples
 basic_jumps = structural_data['data']['basic_jumps']
-volatility_clusters = structural_data['data']['volatility_clustering']
+volatility_clusters = structural_data['data']['volatility_clustering'] 
 complex_patterns = structural_data['data']['complex_patterns']
 ```
 
 ### Sample Data Categories
 
-#### 1. **Structural Changes**
+#### 1. **Structural Changes** (In-Memory Generated)
 ```python
 structural_samples = l3.load_sample_data("structural_changes")
-# Contains:
+# Generated datasets include:
 # - basic_jumps: Simple structural jump patterns
 # - volatility_clustering: GARCH-like volatility patterns  
 # - complex_patterns: Mixed structural change types
 ```
 
-#### 2. **Financial Portfolio**
+#### 2. **Financial Portfolio** (In-Memory Generated)
 ```python
 portfolio_samples = l3.load_sample_data("financial_portfolio")
-# Contains:
+# Generated datasets include:
 # - large_cap_stocks: Major US equities simulation
 # - sector_indices: Sector-based correlation structure
 # - currency_pairs: Major FX cross-rates
 ```
 
-#### 3. **Crisis Scenarios**
+#### 3. **Crisis Scenarios** (In-Memory Generated)
 ```python
 crisis_samples = l3.load_sample_data("crisis_scenarios")
-# Contains:
+# Generated datasets include:
 # - mild_crisis: Low-severity market stress
 # - moderate_crisis: Medium-severity market stress
 # - severe_crisis: High-severity market stress (2008-like)
 ```
 
-#### 4. **Synthetic Markets**
+#### 4. **Synthetic Markets** (In-Memory Generated)
 ```python
 synthetic_samples = l3.load_sample_data("synthetic_markets")
-# Contains:
+# Generated datasets include:
 # - synthetic_market: 10-asset correlated market simulation
 ```
 
