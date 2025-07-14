@@ -11,13 +11,13 @@ import numpy as np
 from typing import Dict
 
 # Import our modules
-from lambda3_gcp_ultimate import (
+from src.cloud.lambda3_gcp_ultimate import (
     run_lambda3_gcp_ultimate,
     GCPUltimateConfig,
     calculate_cost_savings
 )
-from lambda3_result_aggregator import aggregate_lambda3_results
-from lambda3_zeroshot_tensor_field import L3Config
+from src.cloud.lambda3_result_aggregator import aggregate_lambda3_results
+from src.core.lambda3_zeroshot_tensor_field import L3Config
 
 # ===============================
 # EXAMPLE 1: ANALYZE FINANCIAL MARKETS
