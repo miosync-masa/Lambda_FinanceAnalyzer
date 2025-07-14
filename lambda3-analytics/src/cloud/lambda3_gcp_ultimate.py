@@ -30,10 +30,10 @@ from google.api_core import retry
 from google.auth import default
 
 # Import Lambda³ core
-from lambda3_cloud_parallel import (
+from .lambda3_cloud_parallel import (
     CloudScaleConfig, Lambda3TaskDecomposer, ExecutionBackend
 )
-from lambda3_zeroshot_tensor_field import L3Config
+from src.core.lambda3_zeroshot_tensor_field import L3Config
 
 # ===============================
 # ULTIMATE GCP CONFIGURATION
