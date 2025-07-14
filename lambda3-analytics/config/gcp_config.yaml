@@ -1,0 +1,95 @@
+# Lambda³ GCP Configuration
+# GCPでの大規模並列実行用設定
+
+# プロジェクト設定
+project:
+  id: ${GOOGLE_CLOUD_PROJECT}  # 環境変数から取得
+  billing_account: ${GCP_BILLING_ACCOUNT}
+  
+# リージョン設定（コスト最適化順）
+regions:
+  # 米国（最安値）
+  - name: us-central1
+    priority: 1
+    max_instances: 5000
+    machine_types:
+      - e2-highcpu-4
+      - e2-highcpu-8
+      - n2d-highcpu-4
+  
+  - name: us-east1
+    priority: 2
+    max_instances: 5000
+    machine_types:
+      - e2-highcpu-4
+      - n1-highcpu-4
+      
+  - name: us-west1
+    priority: 3
+    max_instances: 3000
+    
+  # ヨーロッパ
+  - name: europe-west1
+    priority: 4
+    max_instances: 3000
+    
+  - name: europe-west4
+    priority: 5
+    max_instances: 2000
+    
+  # アジア（やや高い）
+  - name: asia-northeast1
+    priority: 6
+    max_instances: 2000
+    
+  - name: asia-southeast1
+    priority: 7
+    max_instances: 1000
+
+# ストレージ設定
+storage:
+  primary_bucket: lambda3-${GOOGLE_CLOUD_PROJECT}
+  regional_buckets: true
+  lifecycle_days: 7  # 一時ファイルの自動削除
+  
+# Cloud Batch設定
+batch:
+  service_account: lambda3-worker@${GOOGLE_CLOUD_PROJECT}.iam.gserviceaccount.com
+  network: default
+  subnetwork: default
+  
+  # ジョブテンプレート
+  job_template:
+    allocation_policy:
+      instances:
+        - policy:
+            provisioningModel: SPOT  # スポットインスタンス使用
+            machineType: e2-highcpu-4  # デフォルト
+      location:
+        allowedLocations: []  # 動的に設定
+    
+    logs_policy:
+      destination: CLOUD_LOGGING
+      
+    task_template:
+      max_retry_count: 3
+      max_run_duration: 1800s  # 30分
+      
+# コスト制限
+cost_controls:
+  max_hourly_cost: 100.0  # 時間あたり最大$100
+  max_spot_price: 0.05    # スポット価格上限
+  alert_threshold: 0.8    # 80%でアラート
+  
+# モニタリング
+monitoring:
+  metrics_interval: 60  # 秒
+  alert_channels:
+    - email
+    - slack  # オプション
+  
+# Lambda³固有設定
+lambda3:
+  checkpoint_interval: 100  # ペア数
+  result_aggregation_interval: 300  # 秒
+  preemption_grace_period: 30  # 秒
