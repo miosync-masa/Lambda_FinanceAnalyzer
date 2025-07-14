@@ -420,8 +420,44 @@ async def run_lambda3_gcp_ultimate(
     }
 
 # --- Cost Savings Calculator (変更なし) ---
+
+# ===============================
+# COST SAVINGS CALCULATOR
+# ===============================
 def calculate_cost_savings():
-    # ... (前回のコードと同じなので省略) ...
+    """コスト削減の計算"""
+    print("\n" + "="*60)
+    print("LAMBDA³ COST OPTIMIZATION ANALYSIS")
+    print("="*60)
+    
+    # 仮定値
+    on_demand_price = 0.15  # $/hour
+    spot_price = 0.04      # $/hour
+    instances = 10000
+    hours = 2
+    
+    on_demand_cost = on_demand_price * instances * hours
+    spot_cost = spot_price * instances * hours
+    savings = on_demand_cost - spot_cost
+    savings_percent = (savings / on_demand_cost) * 100
+    
+    print(f"\nScenario: {instances:,} instances for {hours} hours")
+    print(f"On-demand cost: ${on_demand_cost:,.2f}")
+    print(f"Spot cost: ${spot_cost:,.2f}")
+    print(f"Savings: ${savings:,.2f} ({savings_percent:.1f}%)")
+    
+    print("\nAdditional optimizations:")
+    print("• Preemptible instances: 70-90% discount")
+    print("• Regional arbitrage: 10-30% price variation")
+    print("• Off-peak scheduling: Additional 5-15% savings")
+    print("• Batch optimization: 20-40% efficiency gain")
+    
+    return {
+        'on_demand_cost': on_demand_cost,
+        'spot_cost': spot_cost,
+        'savings': savings,
+        'savings_percent': savings_percent
+    }
 
 if __name__ == '__main__':
     # このスクリプトを直接実行した場合のデモ
