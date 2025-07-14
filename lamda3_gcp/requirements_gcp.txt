@@ -1,0 +1,9 @@
+google-cloud-batch>=0.11.0
+google-cloud-storage>=2.10.0
+google-cloud-compute>=1.14.0
+google-cloud-monitoring>=2.15.0
+numpy>=1.24.0
+pandas>=2.0.0
+pymc>=5.7.0
+arviz>=0.16.0
+numba>=0.57.0
