@@ -4,7 +4,7 @@
 set -e
 
 # 正しいバケット名
-BUCKET="lambda3-massive-journal-428603-k7"
+BUCKET="yourbacketname"
 
 echo "=================================================="
 echo "Lambda³ Code Deployment to GCS"
