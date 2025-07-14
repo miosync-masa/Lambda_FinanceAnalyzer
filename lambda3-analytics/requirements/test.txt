@@ -1,0 +1,25 @@
+# Testing dependencies
+-r base.txt
+
+# Testing frameworks
+pytest>=7.3.0
+pytest-cov>=4.0.0
+pytest-xdist>=3.2.0
+pytest-mock>=3.10.0
+pytest-timeout>=2.1.0
+pytest-asyncio>=0.21.0
+
+# Test data generation
+faker>=18.0.0
+hypothesis>=6.70.0
+
+# Mocking and fixtures
+responses>=0.23.0
+freezegun>=1.2.0
+
+# Code coverage
+coverage>=7.2.0
+codecov>=2.1.12
+
+# Performance testing
+pytest-benchmark>=4.0.0
