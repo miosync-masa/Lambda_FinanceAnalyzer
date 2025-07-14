@@ -33,7 +33,7 @@ from google.auth import default
 from .lambda3_cloud_parallel import (
     CloudScaleConfig, Lambda3TaskDecomposer, ExecutionBackend
 )
-from src.core.lambda3_zeroshot_tensor_field import L3Config
+from ..core.lambda3_zeroshot_tensor_field import L3Config
 
 # ===============================
 # ULTIMATE GCP CONFIGURATION
