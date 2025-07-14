@@ -349,8 +349,9 @@ set -e
 pip install numpy pandas pymc arviz google-cloud-storage numba
 
 # Download Lambda³ code
-gsutil cp gs://{self.config.gcs_bucket}/lambda3_core.py .
-gsutil cp gs://{self.config.gcs_bucket}/lambda3_cloud_worker.py .
+mkdir -p src/core src/cloud
+gsutil cp gs://{self.config.gcs_bucket}/core/lambda3_zeroshot_tensor_field.py src/core/
+gsutil cp gs://{self.config.gcs_bucket}/cloud/lambda3_cloud_worker.py src/cloud/
 
 # Download series data
 gsutil cp {series_data_gcs_path} series_data.pkl
