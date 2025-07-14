@@ -6,8 +6,8 @@
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/miosync-masa/Lambda_FinanceAnalyzer/lambda3-analytics.git
-cd lambda3-analytics
+git clone https://github.com/miosync-masa/Lambda_FinanceAnalyzer.git
+cd Lambda_FinanceAnalyzer/lambda3-analytics
 
 # Dockerを使う場合（推奨）
 make docker-build
@@ -97,12 +97,5 @@ pip install pymc arviz
 ### メモリ不足
 → Docker Desktopの設定でメモリを8GB以上に増やす
 
-## 📚 次のステップ
-
-1. `notebooks/01_quick_start.ipynb` を開く
-2. [理論解説](docs/lambda3_theory.md)を読む（準備中）
-3. より大きなデータセットで試す
-4. GCPで大規模並列実行に挑戦
-
 ---
-質問は Issues へ: https://github.com/yourusername/lambda3-analytics/issues
+質問は Issues へ: https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues
