@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  lambda3-main:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-key.json
+    volumes:
+      - ./credentials:/app/credentials:ro
+      - ./data:/app/data
+      - ./results:/app/results
+    
+  lambda3-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/gcp-key.json
+    volumes:
+      - ./credentials:/app/credentials:ro
+    deploy:
+      replicas: 4
+
+  lambda3-notebook:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "8888:8888"
+    volumes:
+      - ../notebooks:/app/notebooks
+      - ../src:/app/src

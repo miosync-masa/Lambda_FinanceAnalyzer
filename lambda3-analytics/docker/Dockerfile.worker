@@ -1,0 +1,15 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Minimal requirements for worker
+COPY requirements/base.txt ./
+RUN pip install --no-cache-dir -r base.txt
+
+# Only copy necessary modules
+COPY src/core/lambda3_zeroshot_tensor_field.py ./src/core/
+COPY src/cloud/lambda3_cloud_worker.py ./
+
+ENV PYTHONPATH=/app:$PYTHONPATH
+
+ENTRYPOINT ["python", "src/cloud/lambda3_cloud_worker.py"]
