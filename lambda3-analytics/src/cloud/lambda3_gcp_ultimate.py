@@ -4,7 +4,7 @@
 # 実際のGCP APIを呼び出し、動的にリソースを確保して
 # Cloud Batchジョブを実行する本番稼働版
 # ==========================================================
-
+from datetime import datetime
 import asyncio
 import json
 import time
