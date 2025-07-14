@@ -8,7 +8,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, List, Tuple, Optional, Any, Set, Union
 from collections import defaultdict
 from queue import PriorityQueue
 import threading
