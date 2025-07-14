@@ -15,14 +15,14 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from src.core.lambda3_zeroshot_tensor_field import (
+from lambda3_analytics.core.lambda3_zeroshot_tensor_field import (
     L3Config,
     run_lambda3_analysis,
     Lambda3BayesianLogger,
     plot_lambda3_summary,
     fetch_financial_data
 )
-from src.utils.data_loader import (
+from lambda3_analytics.utils.data_loader import (
     generate_synthetic_data,
     generate_structural_jumps,
     generate_regime_switching_data,
