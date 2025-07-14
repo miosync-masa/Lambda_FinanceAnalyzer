@@ -1,7 +1,7 @@
 # Lambda³ Analytics Framework
 
 <p align="center">
-  <img src="https://www.miosync.link/github/0_2.jpg" alt="Lambda³" width="400"/>
+  <img src="https://www.miosync.link/github/0_2.jpg" alt="Lambda³" width="100"/>
 </p>
 
 <p align="center">
