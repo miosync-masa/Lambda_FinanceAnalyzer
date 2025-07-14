@@ -28,7 +28,7 @@ from google.auth import default, credentials
 # Import Lambda³ core
 try:
     from .lambda3_cloud_parallel import CloudScaleConfig, Lambda3TaskDecomposer
-    from ..core.lambda3_zeroshot_tensor_field import L3Config
+    from core.lambda3_zeroshot_tensor_field import L3Config # このように修正
 except ImportError:
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
