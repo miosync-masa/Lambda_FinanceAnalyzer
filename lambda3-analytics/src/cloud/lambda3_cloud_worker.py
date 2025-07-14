@@ -15,12 +15,23 @@ import numpy as np
 from google.cloud import storage
 import logging
 
-# Lambda³ imports (these would be downloaded by the task script)
-from ..core.lambda3_zeroshot_tensor_field import (
-    calc_lambda3_features,
-    fit_l3_pairwise_bayesian_system,
-    L3Config
-)
+# Lambda³ imports - Cloud Batch環境用に修正
+try:
+    # パッケージとして実行される場合
+    from core.lambda3_zeroshot_tensor_field import (
+        calc_lambda3_features,
+        fit_l3_pairwise_bayesian_system,
+        L3Config
+    )
+except ImportError:
+    # 直接実行される場合（Cloud Batch環境）
+    import sys
+    sys.path.insert(0, '/workspace')
+    from core.lambda3_zeroshot_tensor_field import (
+        calc_lambda3_features,
+        fit_l3_pairwise_bayesian_system,
+        L3Config
+    )
 
 # Setup logging
 logging.basicConfig(
@@ -120,19 +131,21 @@ class Lambda3CloudWorker:
             trace, model = fit_l3_pairwise_bayesian_system(
                 {name_a: self.series_dict[name_a], name_b: self.series_dict[name_b]},
                 features_dict,
-                L3Config(draws=2000, tune=2000),  # Reduced for speed
+                L3Config(draws=8000, tune=8000),  # Reduced for speed
                 series_pair=(name_a, name_b)
             )
             
             # Extract key results
-            # (In practice, would extract interaction coefficients etc.)
+            # (In practice, would extract actual interaction coefficients)
             result = {
                 'pair': f"{name_a}_vs_{name_b}",
                 'completed': True,
                 'timestamp': time.time(),
                 'worker': f"{self.args.region}_batch_{self.args.batch_index}",
-                # Simplified - would include actual results
-                'interaction_strength': np.random.rand()
+                # Simplified - would include actual Lambda³ results
+                'interaction_strength': np.random.rand(),
+                'structural_coupling': np.random.rand(),
+                'tension_correlation': np.random.rand()
             }
             
             return result
@@ -143,7 +156,8 @@ class Lambda3CloudWorker:
                 'pair': f"{name_a}_vs_{name_b}",
                 'completed': False,
                 'error': str(e),
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'worker': f"{self.args.region}_batch_{self.args.batch_index}"
             }
     
     def upload_result(self, result: dict):
