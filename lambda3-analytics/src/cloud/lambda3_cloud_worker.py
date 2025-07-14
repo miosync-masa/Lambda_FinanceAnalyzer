@@ -16,7 +16,7 @@ from google.cloud import storage
 import logging
 
 # Lambda³ imports (these would be downloaded by the task script)
-from lambda3_zeroshot_tensor_field import (
+from src.core.lambda3_zeroshot_tensor_field import (
     calc_lambda3_features,
     fit_l3_pairwise_bayesian_system,
     L3Config
