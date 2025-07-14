@@ -1,0 +1,66 @@
+# Lambda³ Default Configuration
+
+# Core Lambda³ parameters
+lambda3:
+  T: 150
+  window: 10
+  local_window: 5
+  global_window: 30
+  delta_percentile: 97.0
+  local_jump_percentile: 95.0
+  hierarchical: true
+  
+# Bayesian inference settings
+bayesian:
+  draws: 8000
+  tune: 8000
+  chains: 4
+  cores: 4
+  target_accept: 0.95
+  hdi_prob: 0.94
+  
+# Regime detection
+regime:
+  n_global_regimes: 3
+  regime_names: ["Bull", "Neutral", "Bear"]
+  min_regime_size: 30
+  use_gmm: true
+  stability_threshold: 0.7
+  
+# Cloud execution
+cloud:
+  backend: "local_mp"
+  max_workers: null  # Auto-detect
+  batch_size: 50
+  checkpoint_interval: 100
+  
+# GCP specific
+gcp:
+  project_id: null  # Set via environment
+  regions:
+    - "us-central1"
+    - "us-east1"
+    - "europe-west1"
+    - "asia-northeast1"
+  max_instances_per_region: 5000
+  use_spot: true
+  max_price_per_hour: 0.04
+  
+# Data processing
+data:
+  missing_value_method: "interpolate"
+  alignment_method: "truncate"
+  normalize: false
+  detrend: false
+  
+# Visualization
+visualization:
+  style: "scientific"
+  figure_dpi: 150
+  save_format: "png"
+  
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: null  # Log to file if specified
