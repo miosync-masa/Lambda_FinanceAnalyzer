@@ -754,7 +754,7 @@ async def run_lambda3_cloud_scale(
     
     # Load data
     if isinstance(data_source, str):
-        from test import load_csv_data
+        from src.utils.data_loader import load_csv_data
         series_dict = load_csv_data(data_source)
     else:
         series_dict = data_source
