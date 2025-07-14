@@ -1,16 +1,14 @@
 #!/bin/bash
-# Lambda³ コードをGCSにデプロイ
+# Lambda³ GCSデプロイスクリプト - 更新版
 
 set -e
 
-# プロジェクトとバケットの設定
-PROJECT_ID="massive-journal-428603-k7"
-BUCKET="lambda3-massive-journal"
+# 正しいバケット名
+BUCKET="lambda3-massive-journal-428603-k7"
 
 echo "=================================================="
 echo "Lambda³ Code Deployment to GCS"
 echo "=================================================="
-echo "Project: $PROJECT_ID"
 echo "Bucket: gs://$BUCKET"
 echo ""
 
@@ -21,53 +19,44 @@ PROJECT_ROOT="$SCRIPT_DIR/.."
 # プロジェクトルートに移動
 cd "$PROJECT_ROOT"
 
-# コアモジュールをアップロード
-echo "Uploading core modules..."
-gsutil cp src/core/lambda3_zeroshot_tensor_field.py gs://$BUCKET/code/
-gsutil cp src/core/lambda3_regime_aware_extension.py gs://$BUCKET/code/
+# バケットのルートディレクトリにアップロード
+echo "Uploading Lambda³ modules to bucket root..."
 
-# クラウドモジュールをアップロード
-echo "Uploading cloud modules..."
-gsutil cp src/cloud/lambda3_cloud_parallel.py gs://$BUCKET/code/
-gsutil cp src/cloud/lambda3_gcp_ultimate.py gs://$BUCKET/code/
-gsutil cp src/cloud/lambda3_cloud_worker.py gs://$BUCKET/code/
-gsutil cp src/cloud/lambda3_result_aggregator.py gs://$BUCKET/code/
+# コアモジュール
+echo "  - lambda3_zeroshot_tensor_field.py"
+gsutil cp src/core/lambda3_zeroshot_tensor_field.py gs://$BUCKET/
 
-# __init__.pyファイルもアップロード（モジュール認識用）
-echo "Uploading __init__.py files..."
-echo "" > /tmp/__init__.py
-gsutil cp /tmp/__init__.py gs://$BUCKET/code/core/__init__.py
-gsutil cp /tmp/__init__.py gs://$BUCKET/code/cloud/__init__.py
+echo "  - lambda3_regime_aware_extension.py"
+gsutil cp src/core/lambda3_regime_aware_extension.py gs://$BUCKET/
 
-# requirements.txtを生成してアップロード
-echo "Creating requirements.txt..."
-cat > /tmp/requirements.txt << EOF
-numpy>=1.24.0
-pandas>=2.0.0
-scipy>=1.11.0
-scikit-learn>=1.3.0
-pymc>=5.7.0
-arviz>=0.16.0
-numba>=0.57.0
-google-cloud-storage>=2.10.0
-google-cloud-batch>=0.11.0
-google-cloud-compute>=1.14.0
-EOF
+# クラウドモジュール
+echo "  - lambda3_cloud_parallel.py"
+gsutil cp src/cloud/lambda3_cloud_parallel.py gs://$BUCKET/
 
-gsutil cp /tmp/requirements.txt gs://$BUCKET/code/requirements.txt
+echo "  - lambda3_gcp_ultimate.py"
+gsutil cp src/cloud/lambda3_gcp_ultimate.py gs://$BUCKET/
+
+echo "  - lambda3_cloud_worker.py"
+gsutil cp src/cloud/lambda3_cloud_worker.py gs://$BUCKET/
+
+echo "  - lambda3_result_aggregator.py"
+gsutil cp src/cloud/lambda3_result_aggregator.py gs://$BUCKET/
 
 # 実行権限を設定（パブリック読み取り）
+echo ""
 echo "Setting permissions..."
-gsutil acl ch -u AllUsers:R gs://$BUCKET/code/*.py
-gsutil acl ch -u AllUsers:R gs://$BUCKET/code/requirements.txt
+gsutil acl ch -u AllUsers:R gs://$BUCKET/*.py
 
 # アップロードされたファイルを確認
 echo ""
-echo "Uploaded files:"
-gsutil ls -l gs://$BUCKET/code/
+echo "Verifying uploaded files:"
+gsutil ls -l gs://$BUCKET/*.py
 
 echo ""
 echo "✅ Deployment complete!"
 echo ""
-echo "Next step: Run the test with updated code"
-echo "python test_gcp_simple.py"
+echo "All Lambda³ modules are now available in gs://$BUCKET/"
+echo ""
+echo "Next steps:"
+echo "1. Run test: python test_gcp_simple.py"
+echo "2. Or launch full analysis: python scripts/launch_ultimate_analysis.py"
