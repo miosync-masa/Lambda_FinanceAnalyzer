@@ -121,6 +121,7 @@ class Lambda3ResultAggregator:
         
         return results
     
+    # _merge_region_results 関数の内部
     def _merge_region_results(self, results: List[Dict[str, Any]]):
         """Merge results from a region into global structures"""
         for result in results:
@@ -133,9 +134,18 @@ class Lambda3ResultAggregator:
                 if '_vs_' in pair_key:
                     name_a, name_b = pair_key.split('_vs_')
                     
-                    # Store interaction strength
-                    strength = result.get('interaction_strength', 0)
-                    self.interaction_matrix[name_a][name_b] = strength
+                    # Workerが出力するネストされた構造から値を取得する
+                    coeffs = result.get('coefficients', {})
+                    regime_specific = coeffs.get('regime_specific', {})
+                    strength_a_to_b = regime_specific.get('strength_a_to_b', 0)
+                    strength_b_to_a = regime_specific.get('strength_b_to_a', 0)
+                    
+                    # Store interaction strength (非対称な値を考慮)
+                    if name_a in self.interaction_matrix and name_b in self.interaction_matrix[name_a]:
+                        pass
+                    else:
+                        self.interaction_matrix[name_a][name_b] = strength_a_to_b
+                        self.interaction_matrix[name_b][name_a] = strength_b_to_a
                     
             else:
                 self.failed_pairs.append({
