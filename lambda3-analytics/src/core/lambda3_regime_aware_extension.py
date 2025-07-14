@@ -21,7 +21,7 @@ from numba import jit, njit
 import copy
 
 # Import from main Lambda³ module
-from lambda3_zeroshot_tensor_field import (
+from .lambda3_zeroshot_tensor_field import (
     L3Config, 
     calc_lambda3_features, 
     Lambda3BayesianLogger,
