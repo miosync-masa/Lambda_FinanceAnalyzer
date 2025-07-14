@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 import logging
 import hashlib
+import numpy as np
 from enum import Enum
 from queue import Queue
 import threading
