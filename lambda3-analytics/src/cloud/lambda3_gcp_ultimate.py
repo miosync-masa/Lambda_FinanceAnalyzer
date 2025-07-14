@@ -1,5 +1,7 @@
 # ==========================================================
 # Λ³: GCP Cloud Batch Ultimate Parallel Extension (PRODUCTION)
+# ----------------------------------------------------
+# 製品版：実際のGCP APIを使用した完全実装
 # ==========================================================
 
 import asyncio
@@ -387,28 +389,34 @@ class Lambda3CloudBatchManager:
             logging.error(f"Error with bucket {self.config.gcs_bucket}: {e}")
     
     def _upload_lambda3_code(self):
-        """Lambda³コードをGCSにアップロード"""
+        """Lambda³コードをGCSにアップロード（既存ファイルをチェック）"""
         bucket = self.storage_client.bucket(self.config.gcs_bucket)
         
-        # コアモジュールのパス
-        code_files = [
+        # 必要なモジュール
+        required_files = [
             "lambda3_cloud_worker.py",
+            "lambda3_cloud_parallel.py",
+            "lambda3_gcp_ultimate.py",
             "lambda3_zeroshot_tensor_field.py",
+            "lambda3_regime_aware_extension.py",
         ]
         
-        for filename in code_files:
-            # 実際のファイルパスを探す
-            local_path = Path(__file__).parent / filename
-            if not local_path.exists():
-                # 別の場所を試す
-                local_path = Path(__file__).parent.parent / "core" / filename
-            
-            if local_path.exists():
-                blob = bucket.blob(f"code/{filename}")
-                blob.upload_from_filename(str(local_path))
-                logging.info(f"Uploaded {filename} to GCS")
+        # ルートディレクトリのファイルをチェック
+        for filename in required_files:
+            blob = bucket.blob(filename)
+            if blob.exists():
+                logging.info(f"Found {filename} in bucket root")
             else:
-                logging.warning(f"Could not find {filename}")
+                # ローカルファイルを探してアップロード
+                local_path = Path(__file__).parent / filename
+                if not local_path.exists():
+                    local_path = Path(__file__).parent.parent / "core" / filename
+                
+                if local_path.exists():
+                    blob.upload_from_filename(str(local_path))
+                    logging.info(f"Uploaded {filename} to GCS")
+                else:
+                    logging.warning(f"Could not find {filename}")
     
     def _create_regional_batch_job(
         self,
@@ -433,28 +441,45 @@ class Lambda3CloudBatchManager:
         # ジョブ設定
         job_name = f"lambda3-{region}-{int(time.time())}"
         
-        # タスクスクリプト
+        # タスクスクリプト（ルートディレクトリから取得）
         task_script = f"""#!/bin/bash
 set -e
 
 # 環境設定
 export PYTHONPATH=/workspace:$PYTHONPATH
-export GOOGLE_APPLICATION_DEFAULT_CREDENTIALS=/workspace/credentials.json
+
+# 作業ディレクトリ作成
+mkdir -p /workspace/core
+mkdir -p /workspace/cloud
 
 # 依存関係インストール
-pip install --quiet numpy pandas scipy scikit-learn pymc arviz numba google-cloud-storage
+echo "Installing dependencies..."
+pip install --quiet numpy pandas scipy scikit-learn pymc arviz numba google-cloud-storage google-cloud-batch
 
-# Lambda³コードをダウンロード
-gsutil -q cp gs://{self.config.gcs_bucket}/code/*.py /workspace/
+# Lambda³コードをダウンロード（バケットのルートから）
+echo "Downloading Lambda³ modules..."
+gsutil -q cp gs://{self.config.gcs_bucket}/lambda3_zeroshot_tensor_field.py /workspace/core/
+gsutil -q cp gs://{self.config.gcs_bucket}/lambda3_regime_aware_extension.py /workspace/core/
+gsutil -q cp gs://{self.config.gcs_bucket}/lambda3_cloud_parallel.py /workspace/cloud/
+gsutil -q cp gs://{self.config.gcs_bucket}/lambda3_cloud_worker.py /workspace/cloud/
+gsutil -q cp gs://{self.config.gcs_bucket}/lambda3_gcp_ultimate.py /workspace/cloud/
+
+# __init__.pyを作成
+touch /workspace/core/__init__.py
+touch /workspace/cloud/__init__.py
 
 # シリーズデータをダウンロード
+echo "Downloading series data..."
 gsutil -q cp {series_data_gcs_path} /workspace/series_data.pkl
 
 # バッチデータをダウンロード
+echo "Downloading batch data..."
 gsutil -q cp gs://{self.config.gcs_bucket}/{batch_prefix}/batch_${{BATCH_TASK_INDEX}}.pkl /workspace/batch.pkl
 
 # Lambda³ワーカーを実行
-python3 /workspace/lambda3_cloud_worker.py \\
+echo "Starting Lambda³ worker..."
+cd /workspace
+python3 -m cloud.lambda3_cloud_worker \\
     --series-data /workspace/series_data.pkl \\
     --batch /workspace/batch.pkl \\
     --output-bucket {self.config.gcs_bucket} \\
