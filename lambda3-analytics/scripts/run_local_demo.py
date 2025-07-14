@@ -13,6 +13,7 @@ import time
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 from src.core.lambda3_zeroshot_tensor_field import (
     L3Config,
