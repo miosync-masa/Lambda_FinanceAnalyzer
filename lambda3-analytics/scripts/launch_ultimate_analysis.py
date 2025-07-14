@@ -11,13 +11,14 @@ import numpy as np
 from typing import Dict
 
 # Import our modules
-from lambda3_analytics.src.cloud.lambda3_gcp_ultimate import (
+# ★★★ 修正点1: 正しいインポートパスに修正 ★★★
+from cloud.lambda3_gcp_ultimate import (
     run_lambda3_gcp_ultimate,
     GCPUltimateConfig,
     calculate_cost_savings
 )
-from lambda3_analytics.src.cloud.lambda3_result_aggregator import aggregate_lambda3_results
-from lambda3_analytics.src.core.lambda3_zeroshot_tensor_field import L3Config
+from cloud.lambda3_result_aggregator import aggregate_lambda3_results
+from core.lambda3_zeroshot_tensor_field import L3Config
 
 # ===============================
 # EXAMPLE 1: ANALYZE FINANCIAL MARKETS
@@ -34,8 +35,8 @@ async def analyze_global_markets():
     
     # Generate sample data (in practice, load real data)
     print("\nGenerating sample market data...")
-    n_instruments = 1000
-    n_timepoints = 1000
+    n_instruments = 100
+    n_timepoints = 100
     
     market_data = {}
     instrument_types = ['STOCK', 'FX', 'COMMODITY', 'CRYPTO', 'INDEX']
@@ -76,7 +77,7 @@ async def analyze_global_markets():
         max_price_per_hour=0.04,       # Max $0.04/hour per instance
         checkpoint_every_n_pairs=50,   # Frequent checkpoints
         use_spot=True,                 # Always use spot instances
-        preemption_handling="aggressive"
+        # ★★★ 修正点2: 存在しない引数だったのでこの行を削除 ★★★
     )
     
     l3_config = L3Config(
@@ -102,31 +103,15 @@ async def analyze_global_markets():
     
     # Wait for completion and aggregate
     print("\nWaiting for global computation to complete...")
-    print("(In practice, this runs asynchronously)")
+    print("(This may take several minutes depending on GCP resource availability)")
     
-    # Simulate completion
-    await asyncio.sleep(10)
-    
-    # Aggregate results
-    print("\nAggregating results from all regions...")
-    final_results = await aggregate_lambda3_results(
-        bucket_name=gcp_config.gcs_bucket,
-        regions=gcp_config.regions[:5],  # Top 5 regions for demo
-        output_path="global_market_analysis.pkl"
-    )
-    
-    elapsed_time = time.time() - start_time
-    
-    print("\n" + "="*80)
-    print("ANALYSIS COMPLETE!")
-    print("="*80)
-    print(f"Total time: {elapsed_time/60:.1f} minutes")
-    print(f"Pairs analyzed: {results['total_pairs_analyzed']:,}")
-    print(f"Total cost: ${results['total_cost']:.2f}")
-    print(f"Cost per pair: ${results['total_cost']/results['total_pairs_analyzed']:.6f}")
-    print(f"Speed: {results['total_pairs_analyzed']/elapsed_time:.1f} pairs/second")
-    
-    return final_results
+    # In a real scenario, you might have a separate script for aggregation
+    # or a more robust monitoring loop here.
+    print("\nJob submission complete. Check the GCP console for progress.")
+    print(f"Results will be aggregated in: gs://{gcp_config.gcs_bucket}/results/")
+
+    return {"status": "submitted", "config": gcp_config}
+
 
 # ===============================
 # EXAMPLE 2: SCIENTIFIC DATASET
