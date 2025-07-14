@@ -1,0 +1,33 @@
+FROM python:3.10-slim
+
+# Install system dependencies including Jupyter
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install all requirements including dev tools
+COPY requirements/base.txt requirements/dev.txt requirements/gcp.txt ./
+RUN pip install --no-cache-dir -r base.txt -r dev.txt -r gcp.txt
+
+# Copy source code
+COPY src/ ./src/
+COPY notebooks/ ./notebooks/
+
+# Set Python path
+ENV PYTHONPATH=/app:$PYTHONPATH
+
+# Jupyter configuration
+RUN jupyter notebook --generate-config
+RUN echo "c.NotebookApp.ip = '0.0.0.0'" >> ~/.jupyter/jupyter_notebook_config.py
+RUN echo "c.NotebookApp.allow_root = True" >> ~/.jupyter/jupyter_notebook_config.py
+
+# Expose Jupyter port
+EXPOSE 8888
+
+# Start Jupyter
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
