@@ -1,7 +1,6 @@
 """
 Lambda³ Analytics Framework Setup
 """
-
 from setuptools import setup, find_packages
 from pathlib import Path
 
@@ -70,15 +69,15 @@ setup(
     name="lambda3-analytics",
     version=VERSION,
     author="Masamichi Iizumi",
-    author_email="miizumi@miosync.com",
+    author_email="m.iizumi@miosync.email",
     description="Universal Structural Tensor Field Analytics Framework",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/lambda3-analytics",
+    url="https://github.com/miosync-masa/Lambda_FinanceAnalyzer/tree/main/lambda3-analytics",
     project_urls={
         "Documentation": "https://lambda3-analytics.readthedocs.io",
-        "Source": "https://github.com/yourusername/lambda3-analytics",
-        "Issues": "https://github.com/yourusername/lambda3-analytics/issues",
+        "Source": "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/tree/main/lambda3-analytics",
+        "Issues": "https://github.com/miosync-masa/Lambda_FinanceAnalyzer/issues",
     },
     
     # パッケージ設定
