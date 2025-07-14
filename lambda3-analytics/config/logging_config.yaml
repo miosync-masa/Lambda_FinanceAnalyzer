@@ -1,0 +1,137 @@
+# Lambda³ Logging Configuration
+# 構造的イベント（ΔΛC）のログ設定
+
+version: 1
+disable_existing_loggers: false
+
+# フォーマッター
+formatters:
+  standard:
+    format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+    
+  detailed:
+    format: '%(asctime)s - %(name)s - [%(filename)s:%(lineno)d] - %(levelname)s - %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+    
+  json:
+    class: pythonjsonlogger.jsonlogger.JsonFormatter
+    format: '%(asctime)s %(name)s %(levelname)s %(message)s'
+
+# ハンドラー
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: standard
+    stream: ext://sys.stdout
+    
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: detailed
+    filename: logs/lambda3.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    
+  error_file:
+    class: logging.handlers.RotatingFileHandler
+    level: ERROR
+    formatter: detailed
+    filename: logs/lambda3_error.log
+    maxBytes: 10485760
+    backupCount: 5
+    
+  # GCP Cloud Loggingハンドラー（本番環境用）
+  cloud_logging:
+    class: google.cloud.logging.handlers.CloudLoggingHandler
+    level: INFO
+    
+# ロガー設定
+loggers:
+  # Lambda³コア
+  lambda3_core:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+    
+  # Bayesianロガー（HDI追跡）
+  lambda3_bayesian:
+    level: DEBUG
+    handlers: [console, file]
+    propagate: false
+    
+  # Cloud並列実行
+  lambda3_cloud:
+    level: INFO
+    handlers: [console, file, cloud_logging]
+    propagate: false
+    
+  # レジーム検出
+  lambda3_regime:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+    
+  # GCPワーカー
+  lambda3_worker:
+    level: INFO
+    handlers: [console, cloud_logging]
+    propagate: false
+    
+  # パフォーマンス監視
+  lambda3_performance:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+
+# ルートロガー
+root:
+  level: WARNING
+  handlers: [console, error_file]
+
+# 環境別設定
+environments:
+  development:
+    root:
+      level: DEBUG
+    handlers:
+      console:
+        level: DEBUG
+        
+  production:
+    root:
+      level: WARNING
+    handlers:
+      console:
+        level: WARNING
+      cloud_logging:
+        level: INFO
+        
+  testing:
+    root:
+      level: DEBUG
+    handlers:
+      console:
+        level: ERROR
+
+# Lambda³特有のログ設定
+lambda3_settings:
+  # 構造的イベントのログ
+  log_structural_events: true  # ΔΛC pulsations
+  log_tension_changes: true    # ρT variations
+  log_regime_transitions: true # Regime changes
+  
+  # パフォーマンスログ
+  log_execution_time: true
+  log_memory_usage: true
+  log_pair_progress: true
+  
+  # Bayesianログ
+  log_hdi_intervals: true
+  log_convergence: true
+  log_significant_effects: true
+  
+  # エラー詳細
+  log_stack_traces: true
+  log_failed_pairs: true
