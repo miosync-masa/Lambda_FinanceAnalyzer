@@ -12,17 +12,16 @@ import sys
 import time
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from lambda3_analytics.core.lambda3_zeroshot_tensor_field import (
+from core.lambda3_zeroshot_tensor_field import (
     L3Config,
     run_lambda3_analysis,
     Lambda3BayesianLogger,
     plot_lambda3_summary,
     fetch_financial_data
 )
-from lambda3_analytics.utils.data_loader import (
+from utils.data_loader import (
     generate_synthetic_data,
     generate_structural_jumps,
     generate_regime_switching_data,
@@ -165,7 +164,7 @@ def demo_financial_data():
     start_time = time.time()
     
     # Run analysis with regime detection
-    from src.core.lambda3_regime_aware_extension import (
+    from core.lambda3_regime_aware_extension import (
         run_lambda3_regime_aware_analysis,
         HierarchicalRegimeConfig
     )
@@ -225,7 +224,7 @@ def demo_interactive():
     elif choice == "3":
         csv_path = input("Enter CSV file path: ").strip()
         if Path(csv_path).exists():
-            from src.utils.data_loader import load_csv_data
+            from utils.data_loader import load_csv_data
             data = load_csv_data(csv_path)
             
             config = L3Config()
