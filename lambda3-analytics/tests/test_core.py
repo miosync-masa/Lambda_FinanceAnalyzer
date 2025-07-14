@@ -8,9 +8,6 @@ import pandas as pd
 from pathlib import Path
 import sys
 
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
-
 from core.lambda3_zeroshot_tensor_field import (
     L3Config,
     calc_lambda3_features,
